@@ -10,15 +10,13 @@ from datetime import datetime
 
 st.set_page_config(page_title="Income Portfolio Engine", layout="centered")
 st.title("🔥 Income Portfolio Control Center")
-st.caption("Income growth • smart rebalance • momentum overlay")
+st.caption("Income growth • smart rebalance • target allocations • $1k forecast")
 
 # =========================
 # SETTINGS
 # =========================
 
 ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
-BENCH = "QQQ"
-WINDOW = 120
 INCOME_LOOKBACK_MONTHS = 4
 TARGET_MONTHLY_INCOME = 1000
 
@@ -45,7 +43,7 @@ for i, etf in enumerate(ETF_LIST):
 st.markdown("## 💰 Monthly New Investment")
 
 monthly_contribution = st.number_input(
-    "Cash to invest now ($)",
+    "Cash invested per month ($)",
     min_value=0,
     value=200,
     step=50
@@ -158,26 +156,47 @@ disp["Yield %"] = disp["Yield %"].map("{:.1%}".format)
 st.dataframe(disp, use_container_width=True)
 
 # =========================
-# SMART REBALANCE ENGINE
+# 🎯 INCOME TARGET FORECAST (RESTORED)
+# =========================
+
+st.markdown("## 🎯 Time to $1,000 / Month Forecast")
+
+if total_monthly_income > 0 and total_value > 0:
+    avg_yield = total_monthly_income * 12 / total_value
+
+    months = 0
+    proj_value = total_value
+    proj_income = total_monthly_income
+
+    while proj_income < TARGET_MONTHLY_INCOME and months < 600:
+        proj_value += monthly_contribution
+        proj_value += proj_income  # reinvest dividends
+        proj_income = proj_value * avg_yield / 12
+        months += 1
+
+    st.metric("Months to $1,000/mo", f"{months}")
+    st.metric("Years to $1,000/mo", f"{months/12:.1f}")
+    st.metric("Assumed Yield", f"{avg_yield*100:.1f}%")
+else:
+    st.warning("Income data unavailable for forecast.")
+
+# =========================
+# 🧠 SMART REBALANCE
 # =========================
 
 st.markdown("## 🧠 Smart Rebalance Suggestions")
 
-reb_rows = []
-remaining_cash = monthly_contribution
-
 portfolio_df["Current %"] = portfolio_df["Value"] / total_value * 100
 
+reb_rows = []
 for _, row in portfolio_df.iterrows():
     etf = row["ETF"]
     target_pct = targets.get(etf, 0)
-    diff = target_pct - row["Current %"]
-
     reb_rows.append([
         etf,
         f"{row['Current %']:.1f}%",
         f"{target_pct:.1f}%",
-        diff
+        f"{target_pct - row['Current %']:.1f}%"
     ])
 
 reb_df = pd.DataFrame(reb_rows, columns=["ETF", "Current %", "Target %", "Gap %"])
@@ -193,7 +212,7 @@ for _, row in portfolio_df.iterrows():
     current_pct = row["Value"] / total_value * 100
     target_pct = targets.get(etf, 0)
 
-    if target_pct > current_pct and cash > price:
+    if target_pct > current_pct and cash >= price:
         desired_value = (target_pct / 100) * (total_value + monthly_contribution)
         to_invest = max(0, desired_value - row["Value"])
         shares = int(to_invest // price)
@@ -203,21 +222,20 @@ for _, row in portfolio_df.iterrows():
             cash -= cost
             buy_rows.append([etf, shares, f"${cost:,.0f}"])
 
-if len(buy_rows) == 0:
-    st.info("No strong rebalance buys needed this month.")
-else:
-    buy_df = pd.DataFrame(buy_rows, columns=["ETF", "Shares to Buy", "Est. Cost"])
+if buy_rows:
     st.success("Suggested Buys This Month:")
-    st.dataframe(buy_df, use_container_width=True)
+    st.dataframe(pd.DataFrame(buy_rows, columns=["ETF", "Shares to Buy", "Est. Cost"]), use_container_width=True)
+else:
+    st.info("No strong rebalance buys needed this month.")
 
 # =========================
-# INCOME GROWTH CHART
+# 📈 INCOME GROWTH CHART
 # =========================
 
 st.markdown("## 📈 Income Growth Over Time")
 
 uploaded = st.file_uploader(
-    "Upload your weekly CSV snapshots (multiple allowed)",
+    "Upload weekly CSV snapshots (multiple allowed)",
     type="csv",
     accept_multiple_files=True
 )
@@ -232,24 +250,19 @@ if uploaded:
             t = pd.to_datetime(df["Snapshot Time"].iloc[0], errors="coerce")
             hist_rows.append([t, income])
 
-    if len(hist_rows) > 0:
-        hist_df = pd.DataFrame(hist_rows, columns=["Date", "Monthly Income"])
-        hist_df = hist_df.sort_values("Date")
-
+    if hist_rows:
+        hist_df = pd.DataFrame(hist_rows, columns=["Date", "Monthly Income"]).sort_values("Date")
         st.line_chart(hist_df.set_index("Date"))
 
-        latest = hist_df.iloc[-1]["Monthly Income"]
-        first = hist_df.iloc[0]["Monthly Income"]
-        growth = latest - first
-
-        st.metric("Income Growth", f"${growth:,.0f}")
+        growth = hist_df.iloc[-1]["Monthly Income"] - hist_df.iloc[0]["Monthly Income"]
+        st.metric("Total Income Growth", f"${growth:,.0f}")
     else:
-        st.warning("CSV files missing required columns.")
+        st.warning("Uploaded CSVs missing required columns.")
 else:
-    st.info("Upload weekly CSV exports to see income growth trend.")
+    st.info("Upload weekly CSV exports to see your income growth trend.")
 
 # =========================
-# CSV EXPORT
+# 📤 CSV EXPORT
 # =========================
 
 st.markdown("## 📤 Save Weekly Snapshot")
@@ -266,4 +279,4 @@ st.download_button(
     mime="text/csv"
 )
 
-st.caption("Upload these CSVs later to track income growth over time.")
+st.caption("Keep saving weekly CSVs — they power your income growth chart and long-term tracking.")
