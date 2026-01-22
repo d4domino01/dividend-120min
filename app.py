@@ -46,64 +46,76 @@ for i, etf in enumerate(ETF_LIST):
 
 @st.cache_data(ttl=300)
 def get_intraday_change(ticker):
-    data = yf.download(ticker, period="1d", interval="1m", progress=False)
+    try:
+        data = yf.download(ticker, period="1d", interval="1m", progress=False)
+        if data is None or len(data) < WINDOW:
+            return None, None
 
-    if data is None or len(data) < WINDOW:
+        recent = data.tail(WINDOW)
+        start_price = float(recent["Close"].iloc[0])
+        end_price = float(recent["Close"].iloc[-1])
+        pct = (end_price - start_price) / start_price
+        vol = recent["Close"].pct_change().std()
+
+        if pd.isna(pct) or pd.isna(vol):
+            return None, None
+
+        return pct, vol
+    except Exception:
         return None, None
-
-    recent = data.tail(WINDOW)
-    start_price = float(recent["Close"].iloc[0])
-    end_price = float(recent["Close"].iloc[-1])
-    pct = (end_price - start_price) / start_price
-    vol = recent["Close"].pct_change().std()
-
-    return pct, vol
 
 
 @st.cache_data(ttl=3600)
 def get_recent_dividends(ticker, months=4):
-    stock = yf.Ticker(ticker)
-    divs = stock.dividends
+    try:
+        stock = yf.Ticker(ticker)
+        divs = stock.dividends
 
-    if divs is None or divs.empty:
+        if divs is None or divs.empty:
+            return 0.0, 0.0
+
+        # force datetime index + remove timezone
+        divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
+
+        cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
+        recent = divs[divs.index >= cutoff]
+
+        if recent.empty:
+            return 0.0, 0.0
+
+        total = recent.sum()
+
+        # normalize by real days (better for weekly ETFs)
+        days = max((divs.index.max() - cutoff).days, 1)
+        monthly_avg = total / days * 30
+
+        return float(total), float(monthly_avg)
+    except Exception:
         return 0.0, 0.0
-
-    # force datetime index + remove timezone
-    divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
-
-    cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
-    recent = divs[divs.index >= cutoff]
-
-    if recent.empty:
-        return 0.0, 0.0
-
-    total = recent.sum()
-
-    # normalize by real days, not calendar months
-    days = max((divs.index.max() - cutoff).days, 1)
-    monthly_avg = total / days * 30
-
-    return float(total), float(monthly_avg)
 
 
 @st.cache_data(ttl=300)
 def get_price(ticker):
-    data = yf.download(ticker, period="1d", interval="1m", progress=False)
-    if data is None or len(data) == 0:
+    try:
+        data = yf.download(ticker, period="1d", interval="1m", progress=False)
+        if data is None or len(data) == 0:
+            return None
+        price = float(data["Close"].iloc[-1])
+        if pd.isna(price):
+            return None
+        return price
+    except Exception:
         return None
-    return float(data["Close"].iloc[-1])
 
 # =========================
 # MARKET MODE
 # =========================
 
-bench = get_intraday_change(BENCH)
+bench_chg, _ = get_intraday_change(BENCH)
 
-if bench[0] is None:
+if bench_chg is None:
     st.warning("Market data not available yet. Try later in session.")
     st.stop()
-
-bench_chg = bench[0]
 
 if bench_chg > 0.003:
     market_mode = "AGGRESSIVE"
@@ -156,9 +168,10 @@ c1.metric("Portfolio Value", f"${total_value:,.0f}")
 c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
 c3.metric("Progress to $1k/mo", f"{total_monthly_income/1000*100:.1f}%")
 
-portfolio_df["Price"] = portfolio_df["Price"].map("${:,.2f}".format)
-portfolio_df["Value"] = portfolio_df["Value"].map("${:,.0f}".format)
-portfolio_df["Monthly Income"] = portfolio_df["Monthly Income"].map("${:,.0f}".format)
+if not portfolio_df.empty:
+    portfolio_df["Price"] = portfolio_df["Price"].map("${:,.2f}".format)
+    portfolio_df["Value"] = portfolio_df["Value"].map("${:,.0f}".format)
+    portfolio_df["Monthly Income"] = portfolio_df["Monthly Income"].map("${:,.0f}".format)
 
 st.dataframe(portfolio_df, use_container_width=True)
 
@@ -177,24 +190,32 @@ for etf in ETF_LIST:
     mom_rows.append([etf, chg, vol])
 
 mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
-mom_df = mom_df.sort_values("Momentum", ascending=False).reset_index(drop=True)
 
-signals = []
-for i, row in mom_df.iterrows():
-    if market_mode == "DEFENSIVE":
-        sig = "REDUCE" if row["Momentum"] < 0 else "WAIT"
-    else:
-        if i < 2:
-            sig = "BUY"
-        elif row["Momentum"] < -0.003:
-            sig = "REDUCE"
+if not mom_df.empty:
+    mom_df = mom_df.sort_values("Momentum", ascending=False).reset_index(drop=True)
+
+    signals = []
+    for i, row in mom_df.iterrows():
+        if market_mode == "DEFENSIVE":
+            sig = "REDUCE" if row["Momentum"] < 0 else "WAIT"
         else:
-            sig = "WAIT"
-    signals.append(sig)
+            if i < 2:
+                sig = "BUY"
+            elif row["Momentum"] < -0.003:
+                sig = "REDUCE"
+            else:
+                sig = "WAIT"
+        signals.append(sig)
 
-mom_df["Signal"] = signals
-mom_df["Momentum"] = mom_df["Momentum"].map("{:.2%}".format)
-mom_df["Volatility"] = mom_df["Volatility"].map("{:.4f}".format)
+    mom_df["Signal"] = signals
+
+    mom_df["Momentum"] = mom_df["Momentum"].apply(
+        lambda x: f"{x:.2%}" if pd.notna(x) else "—"
+    )
+
+    mom_df["Volatility"] = mom_df["Volatility"].apply(
+        lambda x: f"{x:.4f}" if pd.notna(x) else "—"
+    )
 
 st.dataframe(mom_df, use_container_width=True)
 
@@ -204,8 +225,11 @@ st.dataframe(mom_df, use_container_width=True)
 
 st.markdown("## 🔄 Weekly Rotation Guidance")
 
-buys = mom_df[mom_df["Signal"] == "BUY"]["ETF"].tolist()
-reduces = mom_df[mom_df["Signal"] == "REDUCE"]["ETF"].tolist()
+if not mom_df.empty:
+    buys = mom_df[mom_df["Signal"] == "BUY"]["ETF"].tolist()
+    reduces = mom_df[mom_df["Signal"] == "REDUCE"]["ETF"].tolist()
+else:
+    buys, reduces = [], []
 
 if market_mode == "DEFENSIVE":
     st.error("Risk-off environment — protect capital and income.")
