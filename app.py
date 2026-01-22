@@ -54,30 +54,42 @@ monthly_contribution = st.number_input(
 # HELPERS
 # =========================
 
-@st.cache_data(ttl=600)
-def get_last_120min_change(ticker):
+@st.cache_data(ttl=900)
+def get_recent_momentum(ticker):
     """
-    Uses LAST AVAILABLE 120 one-minute candles (not only live market).
-    Works after hours and before open.
+    Tries 1-min candles first (last 120 mins).
+    If unavailable, falls back to 5-min candles (last 10 hours).
     """
+
+    # ----- TRY 1 MIN DATA -----
     try:
         data = yf.download(ticker, period="2d", interval="1m", progress=False)
-        if data is None or len(data) < WINDOW:
-            return None, None
-
-        recent = data.tail(WINDOW)
-        start_price = float(recent["Close"].iloc[0])
-        end_price = float(recent["Close"].iloc[-1])
-
-        pct = (end_price - start_price) / start_price
-        vol = recent["Close"].pct_change().std()
-
-        if pd.isna(pct) or pd.isna(vol):
-            return None, None
-
-        return pct, vol
+        if data is not None and len(data) >= WINDOW:
+            recent = data.tail(WINDOW)
+            start = float(recent["Close"].iloc[0])
+            end = float(recent["Close"].iloc[-1])
+            pct = (end - start) / start
+            vol = recent["Close"].pct_change().std()
+            if not pd.isna(pct):
+                return pct, vol, "1m"
     except Exception:
-        return None, None
+        pass
+
+    # ----- FALLBACK: 5 MIN DATA -----
+    try:
+        data = yf.download(ticker, period="5d", interval="5m", progress=False)
+        if data is not None and len(data) >= WINDOW:
+            recent = data.tail(WINDOW)
+            start = float(recent["Close"].iloc[0])
+            end = float(recent["Close"].iloc[-1])
+            pct = (end - start) / start
+            vol = recent["Close"].pct_change().std()
+            if not pd.isna(pct):
+                return pct, vol, "5m"
+    except Exception:
+        pass
+
+    return None, None, None
 
 
 @st.cache_data(ttl=3600)
@@ -90,7 +102,6 @@ def get_recent_dividends(ticker, months=4):
             return 0.0, 0.0
 
         divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
-
         cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
         recent = divs[divs.index >= cutoff]
 
@@ -120,14 +131,14 @@ def get_last_close_price(ticker):
         return None
 
 # =========================
-# MARKET MODE (LAST 120 MIN)
+# MARKET MODE (BENCHMARK)
 # =========================
 
-bench_chg, _ = get_last_120min_change(BENCH)
+bench_chg, _, bench_tf = get_recent_momentum(BENCH)
 
 if bench_chg is None:
     market_mode = "UNKNOWN"
-    st.info("Recent intraday data unavailable — momentum signals paused.")
+    st.info("Recent intraday data unavailable — using income-only mode.")
     bench_chg = 0.0
 else:
     if bench_chg > 0.003:
@@ -146,7 +157,7 @@ elif market_mode == "NEUTRAL":
 else:
     st.info("⚪ MARKET MODE: UNAVAILABLE")
 
-st.metric("QQQ (last available 120 min)", f"{bench_chg*100:.2f}%")
+st.metric(f"QQQ momentum ({bench_tf or 'n/a'})", f"{bench_chg*100:.2f}%")
 
 # =========================
 # PORTFOLIO SNAPSHOT
@@ -218,24 +229,26 @@ else:
     st.warning("Income data unavailable for forecast.")
 
 # =========================
-# MOMENTUM ENGINE (LAST 120 MIN)
+# MOMENTUM ENGINE
 # =========================
 
-st.markdown("## ⚡ Momentum Ranking (Last Available 120 Minutes)")
+st.markdown("## ⚡ Momentum Ranking (Recent Candles)")
 
 mom_rows = []
+timeframes = set()
 
 for etf in ETF_LIST:
-    chg, vol = get_last_120min_change(etf)
+    chg, vol, tf = get_recent_momentum(etf)
     if chg is None:
         continue
-    mom_rows.append([etf, chg, vol])
+    mom_rows.append([etf, chg, vol, tf])
+    timeframes.add(tf)
 
 if len(mom_rows) == 0:
     st.info("No recent intraday data available yet.")
     mom_df = pd.DataFrame(columns=["ETF", "Momentum", "Volatility", "Signal"])
 else:
-    mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
+    mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility", "TF"])
     mom_df = mom_df.sort_values("Momentum", ascending=False).reset_index(drop=True)
 
     signals = []
@@ -254,6 +267,8 @@ else:
     mom_df["Signal"] = signals
     mom_df["Momentum"] = mom_df["Momentum"].apply(lambda x: f"{x:.2%}")
     mom_df["Volatility"] = mom_df["Volatility"].apply(lambda x: f"{x:.4f}")
+
+    mom_df = mom_df.drop(columns=["TF"])
 
 st.dataframe(mom_df, use_container_width=True)
 
@@ -282,4 +297,4 @@ elif market_mode in ["AGGRESSIVE", "NEUTRAL"]:
 else:
     st.info("Rotation signals unavailable.")
 
-st.caption("Momentum uses the LAST AVAILABLE 120 one-minute candles, not only live data.")
+st.caption("Momentum uses 1-min candles when available, otherwise 5-min candles from the last sessions.")
