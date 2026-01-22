@@ -8,9 +8,9 @@ from datetime import datetime
 # PAGE
 # =============================
 
-st.set_page_config(page_title="Income Engine v4", layout="centered")
-st.title("🔥 Income Strategy Engine v4")
-st.caption("Two-Phase Income Plan • Error-Safe Edition")
+st.set_page_config(page_title="Income Engine v5", layout="centered")
+st.title("🔥 Income Strategy Engine v5")
+st.caption("Income-first • Ex-date timing • Two-phase reinvestment plan")
 
 # =============================
 # SETTINGS
@@ -24,7 +24,7 @@ TARGET2 = 2000
 # INPUTS
 # =============================
 
-st.markdown("## 📥 Holdings")
+st.markdown("## 📥 Your Holdings")
 
 holdings = {}
 cols = st.columns(len(ETF_LIST))
@@ -38,7 +38,7 @@ monthly_contribution = st.number_input("Monthly Investment ($)",0,5000,200,50)
 total_contributions = st.number_input("Total Contributions To Date ($)",0,1_000_000,10000,500)
 
 # =============================
-# SAFE DATA HELPERS
+# SAFE HELPERS
 # =============================
 
 @st.cache_data(ttl=600)
@@ -56,14 +56,21 @@ def safe_divs(t, months=4):
     try:
         divs = yf.Ticker(t).dividends
         if divs is None or divs.empty:
-            return 0.0
+            return 0.0, None
+
         divs.index = pd.to_datetime(divs.index, errors="coerce")
         cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
         recent = divs[divs.index >= cutoff]
-        if recent.empty: return 0.0
-        return float(recent.sum() / months)
+
+        last_ex = divs.index.max()
+
+        if recent.empty:
+            return 0.0, last_ex
+
+        monthly_avg = float(recent.sum() / months)
+        return monthly_avg, last_ex
     except:
-        return 0.0
+        return 0.0, None
 
 # =============================
 # PORTFOLIO SNAPSHOT
@@ -76,9 +83,10 @@ total_income=0
 for etf in ETF_LIST:
     sh = holdings.get(etf,0)
     p = safe_price(etf)
-    m = safe_divs(etf)
+    m, last_ex = safe_divs(etf)
 
-    if p is None: continue
+    if p is None:
+        continue
 
     val = sh*p
     inc = sh*m
@@ -86,9 +94,17 @@ for etf in ETF_LIST:
     total_value += val
     total_income += inc
 
-    rows.append([etf,sh,p,val,inc])
+    zone = "HOLD"
+    if last_ex is not None:
+        days = (pd.Timestamp.now() - last_ex).days
+        if days <= 2:
+            zone = "BUY"
+        elif days >= 5:
+            zone = "SELL"
 
-df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income"])
+    rows.append([etf,sh,p,val,inc,zone])
+
+df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income","Cycle Zone"])
 
 st.markdown("## 📊 Portfolio Snapshot")
 
@@ -105,7 +121,24 @@ disp["Monthly Income"] = disp["Monthly Income"].map("${:,.0f}".format)
 st.dataframe(disp, use_container_width=True)
 
 # =============================
-# TWO-PHASE SIMULATOR
+# WEEKLY ACTION PLAN
+# =============================
+
+st.markdown("## 🔄 Weekly Reinvestment Guidance")
+
+buys = df[df["Cycle Zone"]=="BUY"]["ETF"].tolist()
+sells = df[df["Cycle Zone"]=="SELL"]["ETF"].tolist()
+holds = df[df["Cycle Zone"]=="HOLD"]["ETF"].tolist()
+
+if buys:
+    st.success("🔥 BUY (post-ex date): " + ", ".join(buys))
+if sells:
+    st.warning("⚠ Consider TRIMMING: " + ", ".join(sells))
+if holds:
+    st.info("⏸ HOLD: " + ", ".join(holds))
+
+# =============================
+# TWO-PHASE INCOME SIMULATOR
 # =============================
 
 st.markdown("## 🎯 Two-Phase Income Plan Projection")
