@@ -10,7 +10,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="Income Portfolio Engine", layout="centered")
 st.title("🔥 Income Portfolio Control Center")
-st.caption("Income growth • smart rebalance • target allocations • $1k forecast")
+st.caption("Income • true returns • smart rebalance • allocation optimizer")
 
 # =========================
 # SETTINGS
@@ -49,11 +49,20 @@ monthly_contribution = st.number_input(
     step=50
 )
 
+st.markdown("## 🧾 Lifetime Contributions So Far")
+
+total_contributions = st.number_input(
+    "Total cash you have invested so far ($)",
+    min_value=0,
+    value=10000,
+    step=500
+)
+
 # =========================
 # TARGET ALLOCATIONS
 # =========================
 
-st.markdown("## 🎯 Target Allocation (%)")
+st.markdown("## 🎯 Your Target Allocation (%)")
 
 alloc_cols = st.columns(len(ETF_LIST))
 targets = {}
@@ -72,7 +81,7 @@ for i, etf in enumerate(ETF_LIST):
 
 total_target = sum(targets.values())
 if total_target != 100:
-    st.warning(f"⚠ Target allocations must total 100% (currently {total_target}%).")
+    st.warning(f"⚠ Targets must total 100% (currently {total_target}%).")
 
 # =========================
 # HELPERS
@@ -112,6 +121,17 @@ def get_last_close_price(ticker):
     except Exception:
         return None
 
+
+@st.cache_data(ttl=3600)
+def get_price_volatility(ticker):
+    try:
+        data = yf.download(ticker, period="6mo", interval="1d", progress=False)
+        if data is None or len(data) < 30:
+            return np.nan
+        return data["Close"].pct_change().std()
+    except Exception:
+        return np.nan
+
 # =========================
 # PORTFOLIO + INCOME
 # =========================
@@ -119,6 +139,7 @@ def get_last_close_price(ticker):
 rows = []
 total_value = 0
 total_monthly_income = 0
+total_est_annual_divs = 0
 
 for etf in ETF_LIST:
     shares = holdings.get(etf, 0)
@@ -130,33 +151,59 @@ for etf in ETF_LIST:
     _, monthly_income = get_recent_dividends(etf, INCOME_LOOKBACK_MONTHS)
     income = monthly_income * shares
     yield_pct = (monthly_income * 12) / price if price > 0 else 0
+    est_annual_div = income * 12
 
     total_value += value
     total_monthly_income += income
+    total_est_annual_divs += est_annual_div
 
-    rows.append([etf, shares, price, value, income, yield_pct])
+    vol = get_price_volatility(etf)
+
+    rows.append([etf, shares, price, value, income, yield_pct, vol])
 
 portfolio_df = pd.DataFrame(rows, columns=[
-    "ETF", "Shares", "Price", "Value", "Monthly Income", "Yield %"
+    "ETF", "Shares", "Price", "Value", "Monthly Income", "Yield %", "Volatility"
 ])
+
+# =========================
+# SNAPSHOT
+# =========================
 
 st.markdown("## 📊 Portfolio Snapshot")
 
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 c1.metric("Portfolio Value", f"${total_value:,.0f}")
 c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-c3.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
+c3.metric("Annual Income", f"${total_monthly_income*12:,.0f}")
+c4.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
 
 disp = portfolio_df.copy()
 disp["Price"] = disp["Price"].map("${:,.2f}".format)
 disp["Value"] = disp["Value"].map("${:,.0f}".format)
 disp["Monthly Income"] = disp["Monthly Income"].map("${:,.0f}".format)
 disp["Yield %"] = disp["Yield %"].map("{:.1%}".format)
+disp["Volatility"] = disp["Volatility"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
 
 st.dataframe(disp, use_container_width=True)
 
 # =========================
-# 🎯 INCOME TARGET FORECAST (RESTORED)
+# 🧾 TRUE RETURN TRACKING
+# =========================
+
+st.markdown("## 🧾 True Return Tracking")
+
+total_gain = total_value + total_est_annual_divs - total_contributions
+roi_pct = total_gain / total_contributions if total_contributions > 0 else 0
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Total Contributions", f"${total_contributions:,.0f}")
+c2.metric("Est. Annual Dividends", f"${total_est_annual_divs:,.0f}")
+c3.metric("True ROI (value + income)", f"{roi_pct*100:.1f}%")
+
+st.caption("ROI = (portfolio value + next 12 months income – contributions) ÷ contributions")
+
+# =========================
+# 🎯 INCOME TARGET FORECAST
 # =========================
 
 st.markdown("## 🎯 Time to $1,000 / Month Forecast")
@@ -170,7 +217,7 @@ if total_monthly_income > 0 and total_value > 0:
 
     while proj_income < TARGET_MONTHLY_INCOME and months < 600:
         proj_value += monthly_contribution
-        proj_value += proj_income  # reinvest dividends
+        proj_value += proj_income
         proj_income = proj_value * avg_yield / 12
         months += 1
 
@@ -181,94 +228,40 @@ else:
     st.warning("Income data unavailable for forecast.")
 
 # =========================
-# 🧠 SMART REBALANCE
+# 🧩 AUTO-ALLOCATION OPTIMIZER
 # =========================
 
-st.markdown("## 🧠 Smart Rebalance Suggestions")
+st.markdown("## 🧩 Auto-Allocation Optimizer")
 
-portfolio_df["Current %"] = portfolio_df["Value"] / total_value * 100
+opt_df = portfolio_df.copy()
 
-reb_rows = []
-for _, row in portfolio_df.iterrows():
-    etf = row["ETF"]
-    target_pct = targets.get(etf, 0)
-    reb_rows.append([
-        etf,
-        f"{row['Current %']:.1f}%",
-        f"{target_pct:.1f}%",
-        f"{target_pct - row['Current %']:.1f}%"
-    ])
-
-reb_df = pd.DataFrame(reb_rows, columns=["ETF", "Current %", "Target %", "Gap %"])
-st.dataframe(reb_df, use_container_width=True)
-
-# Buy suggestions
-buy_rows = []
-cash = monthly_contribution
-
-for _, row in portfolio_df.iterrows():
-    etf = row["ETF"]
-    price = row["Price"]
-    current_pct = row["Value"] / total_value * 100
-    target_pct = targets.get(etf, 0)
-
-    if target_pct > current_pct and cash >= price:
-        desired_value = (target_pct / 100) * (total_value + monthly_contribution)
-        to_invest = max(0, desired_value - row["Value"])
-        shares = int(to_invest // price)
-        cost = shares * price
-
-        if shares > 0 and cost <= cash:
-            cash -= cost
-            buy_rows.append([etf, shares, f"${cost:,.0f}"])
-
-if buy_rows:
-    st.success("Suggested Buys This Month:")
-    st.dataframe(pd.DataFrame(buy_rows, columns=["ETF", "Shares to Buy", "Est. Cost"]), use_container_width=True)
-else:
-    st.info("No strong rebalance buys needed this month.")
-
-# =========================
-# 📈 INCOME GROWTH CHART
-# =========================
-
-st.markdown("## 📈 Income Growth Over Time")
-
-uploaded = st.file_uploader(
-    "Upload weekly CSV snapshots (multiple allowed)",
-    type="csv",
-    accept_multiple_files=True
+# Score = high yield + low volatility
+opt_df["Score"] = (
+    (opt_df["Yield %"] / opt_df["Yield %"].max()) * 0.6 +
+    (1 - (opt_df["Volatility"] / opt_df["Volatility"].max())) * 0.4
 )
 
-if uploaded:
-    hist_rows = []
+opt_df["Opt %"] = opt_df["Score"] / opt_df["Score"].sum() * 100
 
-    for f in uploaded:
-        df = pd.read_csv(f)
-        if "Monthly Income" in df.columns and "Snapshot Time" in df.columns:
-            income = df["Monthly Income"].sum()
-            t = pd.to_datetime(df["Snapshot Time"].iloc[0], errors="coerce")
-            hist_rows.append([t, income])
+opt_view = opt_df[["ETF", "Yield %", "Volatility", "Opt %"]].copy()
+opt_view["Yield %"] = opt_view["Yield %"].map("{:.1%}".format)
+opt_view["Volatility"] = opt_view["Volatility"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
+opt_view["Opt %"] = opt_view["Opt %"].map("{:.1f}%".format)
 
-    if hist_rows:
-        hist_df = pd.DataFrame(hist_rows, columns=["Date", "Monthly Income"]).sort_values("Date")
-        st.line_chart(hist_df.set_index("Date"))
+st.write("Suggested allocation based on **income + stability balance**:")
+st.dataframe(opt_view, use_container_width=True)
 
-        growth = hist_df.iloc[-1]["Monthly Income"] - hist_df.iloc[0]["Monthly Income"]
-        st.metric("Total Income Growth", f"${growth:,.0f}")
-    else:
-        st.warning("Uploaded CSVs missing required columns.")
-else:
-    st.info("Upload weekly CSV exports to see your income growth trend.")
+st.caption("Optimizer favors higher income and lower volatility ETFs.")
 
 # =========================
-# 📤 CSV EXPORT
+# CSV EXPORT
 # =========================
 
 st.markdown("## 📤 Save Weekly Snapshot")
 
 export_df = portfolio_df.copy()
 export_df["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+export_df["Total Contributions"] = total_contributions
 
 csv = export_df.to_csv(index=False).encode("utf-8")
 
@@ -279,4 +272,4 @@ st.download_button(
     mime="text/csv"
 )
 
-st.caption("Keep saving weekly CSVs — they power your income growth chart and long-term tracking.")
+st.caption("Save these weekly to track income growth and true ROI over time.")
