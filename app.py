@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
 
 # =========================
 # PAGE
@@ -30,7 +29,7 @@ st.markdown("## 📥 Your Actual Holdings")
 holdings = {}
 cols = st.columns(len(ETF_LIST))
 
-default_vals = {"CHPY":55,"QDTE":110,"XDTE":69,"JEPQ":19,"AIPI":14}
+default_vals = {"CHPY": 55, "QDTE": 110, "XDTE": 69, "JEPQ": 19, "AIPI": 14}
 
 for i, etf in enumerate(ETF_LIST):
     with cols[i]:
@@ -48,6 +47,7 @@ for i, etf in enumerate(ETF_LIST):
 @st.cache_data(ttl=300)
 def get_intraday_change(ticker):
     data = yf.download(ticker, period="1d", interval="1m", progress=False)
+
     if data is None or len(data) < WINDOW:
         return None, None
 
@@ -68,17 +68,20 @@ def get_recent_dividends(ticker, months=4):
     if divs is None or divs.empty:
         return 0.0, 0.0
 
-    # FIX: force datetime index
-    divs.index = pd.to_datetime(divs.index)
+    # force datetime index + remove timezone
+    divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
 
-    cutoff = pd.Timestamp.now(tz=None) - pd.DateOffset(months=months)
+    cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
     recent = divs[divs.index >= cutoff]
 
-    if len(recent) == 0:
+    if recent.empty:
         return 0.0, 0.0
 
     total = recent.sum()
-    monthly_avg = total / months
+
+    # normalize by real days, not calendar months
+    days = max((divs.index.max() - cutoff).days, 1)
+    monthly_avg = total / days * 30
 
     return float(total), float(monthly_avg)
 
