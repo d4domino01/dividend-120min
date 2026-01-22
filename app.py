@@ -8,9 +8,9 @@ from datetime import datetime
 # PAGE
 # =============================
 
-st.set_page_config(page_title="Income Engine v5", layout="centered")
-st.title("🔥 Income Strategy Engine v5")
-st.caption("Income-first • Ex-date timing • Two-phase reinvestment plan")
+st.set_page_config(page_title="Income Engine v5.2", layout="centered")
+st.title("🔥 Income Strategy Engine v5.2")
+st.caption("Distribution-based income • Ex-date timing • Two-phase reinvestment")
 
 # =============================
 # SETTINGS
@@ -19,6 +19,7 @@ st.caption("Income-first • Ex-date timing • Two-phase reinvestment plan")
 ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
 TARGET1 = 1000
 TARGET2 = 2000
+LOOKBACK_MONTHS = 4
 
 # =============================
 # INPUTS
@@ -41,34 +42,40 @@ total_contributions = st.number_input("Total Contributions To Date ($)",0,1_000_
 # SAFE HELPERS
 # =============================
 
-@st.cache_data(ttl=600)
-def safe_price(t):
+@st.cache_data(ttl=900)
+def get_price(t):
     try:
-        d = yf.download(t,period="5d",interval="1d",progress=False)
-        if d is None or d.empty: return None
+        d = yf.download(t, period="5d", interval="1d", progress=False)
+        if d is None or d.empty:
+            return None
         v = float(d["Close"].iloc[-1])
         return v if np.isfinite(v) else None
     except:
         return None
 
+
 @st.cache_data(ttl=3600)
-def safe_divs(t, months=4):
+def get_recent_distributions(t, months=4):
     try:
-        divs = yf.Ticker(t).dividends
-        if divs is None or divs.empty:
+        hist = yf.download(t, period="6mo", interval="1d", actions=True, progress=False)
+        if hist is None or hist.empty or "Dividends" not in hist:
+            return 0.0, None
+
+        divs = hist["Dividends"]
+        divs = divs[divs > 0]
+
+        if divs.empty:
             return 0.0, None
 
         divs.index = pd.to_datetime(divs.index, errors="coerce")
         cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
         recent = divs[divs.index >= cutoff]
 
-        last_ex = divs.index.max()
-
         if recent.empty:
-            return 0.0, last_ex
+            return 0.0, divs.index.max()
 
         monthly_avg = float(recent.sum() / months)
-        return monthly_avg, last_ex
+        return monthly_avg, divs.index.max()
     except:
         return 0.0, None
 
@@ -82,14 +89,14 @@ total_income=0
 
 for etf in ETF_LIST:
     sh = holdings.get(etf,0)
-    p = safe_price(etf)
-    m, last_ex = safe_divs(etf)
+    price = get_price(etf)
+    m_dist, last_ex = get_recent_distributions(etf, LOOKBACK_MONTHS)
 
-    if p is None:
+    if price is None:
         continue
 
-    val = sh*p
-    inc = sh*m
+    val = sh * price
+    inc = sh * m_dist
 
     total_value += val
     total_income += inc
@@ -102,7 +109,7 @@ for etf in ETF_LIST:
         elif days >= 5:
             zone = "SELL"
 
-    rows.append([etf,sh,p,val,inc,zone])
+    rows.append([etf,sh,price,val,inc,zone])
 
 df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income","Cycle Zone"])
 
@@ -155,7 +162,7 @@ if total_value > 0 and total_income > 0:
     to1 = None
     to2 = None
 
-    while m < 360:   # 30 years cap
+    while m < 360:
         m += 1
 
         if income < TARGET1:
