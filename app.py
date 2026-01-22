@@ -3,174 +3,191 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="Income ETF Power Hour Engine", layout="centered")
+st.set_page_config(page_title="Income Rotation Engine", layout="centered")
 
-st.title("🔥 Income ETF Power-Hour Decision Engine")
-st.caption("Ultra-aggressive income rotation — last 120-minute momentum")
+st.title("🔥 Ultra-Aggressive Income Rotation Engine")
+st.caption("Momentum + income-weighted ETF rotation for dividend compounding")
 
-ETF_LIST = ["QDTE", "XDTE", "CHPY", "SPYI", "JEPQ"]
-MARKET_BENCH = "QQQ"
-WINDOW = 120  # minutes
+ETF_LIST = ["QDTE", "XDTE", "CHPY", "AIPI", "JEPQ"]
+MARKET = "QQQ"
+WINDOW = 120
 
-# ---------------- DATA FUNCTIONS ---------------- #
+# ==============================
+# HOLDINGS INPUT — MAIN PAGE
+# ==============================
 
-def get_intraday_change(ticker):
+st.markdown("## 📥 Enter Your Current Holdings (Shares)")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    qdte_sh = st.number_input("QDTE Shares", value=110, step=1)
+    xdte_sh = st.number_input("XDTE Shares", value=69, step=1)
+
+with col2:
+    chpy_sh = st.number_input("CHPY Shares", value=55, step=1)
+    aipi_sh = st.number_input("AIPI Shares", value=14, step=1)
+
+with col3:
+    jepq_sh = st.number_input("JEPQ Shares", value=19, step=1)
+
+holdings = {
+    "QDTE": qdte_sh,
+    "XDTE": xdte_sh,
+    "CHPY": chpy_sh,
+    "AIPI": aipi_sh,
+    "JEPQ": jepq_sh,
+}
+
+cash_to_reinvest = st.number_input("💵 Cash to deploy today ($)", value=300, step=50)
+
+st.markdown("---")
+
+# ==============================
+# DATA
+# ==============================
+
+@st.cache_data(ttl=300)
+def get_intraday(ticker):
     data = yf.download(ticker, period="1d", interval="1m", progress=False)
-
     if data is None or len(data) < WINDOW:
-        return None, None, None
+        return None, None, None, None
 
     recent = data.tail(WINDOW)
-
-    start_price = float(recent["Close"].iloc[0])
-    end_price = float(recent["Close"].iloc[-1])
-
-    pct = (end_price - start_price) / start_price
+    start = recent["Close"].iloc[0]
+    end = recent["Close"].iloc[-1]
+    pct = (end - start) / start
     vol = recent["Close"].pct_change().std()
+    price = recent["Close"].iloc[-1]
 
-    # normalized series for chart (% from start)
-    norm = (recent["Close"] / start_price - 1) * 100
+    return float(pct), float(vol), float(price), recent
 
-    return float(pct), float(vol), norm
+# ==============================
+# MARKET MODE
+# ==============================
 
+bench_chg, _, _, _ = get_intraday(MARKET)
 
-# ---------------- MARKET MODE ---------------- #
-
-bench_change, bench_vol, bench_norm = get_intraday_change(MARKET_BENCH)
-
-if bench_change is None:
-    st.warning("Market data not available yet. Try closer to market close.")
+if bench_chg is None:
+    st.warning("Market data not available yet. Try during market hours.")
     st.stop()
 
-if bench_change > 0.003:
-    market_mode = "RISK-ON"
-elif bench_change < -0.003:
-    market_mode = "RISK-OFF"
+if bench_chg > 0.003:
+    market_mode = "AGGRESSIVE"
+elif bench_chg < -0.003:
+    market_mode = "DEFENSIVE"
 else:
     market_mode = "NEUTRAL"
 
-if market_mode == "RISK-ON":
-    st.success("🟢 MARKET MODE: RISK-ON — buying pressure into close")
-elif market_mode == "RISK-OFF":
-    st.error("🔴 MARKET MODE: RISK-OFF — selling pressure into close")
+if market_mode == "AGGRESSIVE":
+    st.success("🟢 MARKET MODE: AGGRESSIVE (risk-on)")
+elif market_mode == "DEFENSIVE":
+    st.error("🔴 MARKET MODE: DEFENSIVE (risk-off)")
 else:
     st.warning("🟡 MARKET MODE: NEUTRAL — no strong edge")
 
-st.metric("QQQ (last 2h)", f"{bench_change*100:.2f}%")
+st.metric("QQQ (last 120 min)", f"{bench_chg*100:.2f}%")
 
-
-# ---------------- ETF SCORING ---------------- #
+# ==============================
+# ETF ANALYSIS
+# ==============================
 
 rows = []
-charts = {}
+total_value = 0
+
+income_weight = {
+    "QDTE": 0.6,
+    "XDTE": 0.6,
+    "CHPY": 1.0,
+    "AIPI": 1.1,
+    "JEPQ": 0.8
+}
 
 for etf in ETF_LIST:
-    chg, vol, norm = get_intraday_change(etf)
+    chg, vol, price, _ = get_intraday(etf)
     if chg is None:
         continue
 
-    rel = chg - bench_change
+    shares = holdings[etf]
+    value = shares * price
+    total_value += value
 
-    score = (
-        (chg * 100) * 45 +
-        (rel * 100) * 35 -
-        (vol * 1000) * 10
-    )
+    score = chg*100*40 + income_weight[etf]*10 - vol*1000*5
 
-    rows.append([etf, chg, rel, vol, score])
-    charts[etf] = norm
+    rows.append([etf, chg, vol, price, shares, value, score])
 
-df = pd.DataFrame(rows, columns=["ETF", "Momentum", "RelStrength", "Volatility", "Score"])
+df = pd.DataFrame(rows, columns=[
+    "ETF", "Momentum", "Volatility", "Price", "Shares", "Value", "Score"
+])
+
+df["Weight"] = df["Value"] / total_value
 df = df.sort_values("Score", ascending=False).reset_index(drop=True)
 
-# ---------------- CONFIDENCE ---------------- #
-
-if len(df) >= 3:
-    score_gap = df.loc[1, "Score"] - df.loc[2, "Score"]
-else:
-    score_gap = 0
-
-if market_mode == "RISK-ON" and score_gap > 10:
-    confidence = "🔥 HIGH"
-elif market_mode == "RISK-OFF":
-    confidence = "🔴 LOW"
-else:
-    confidence = "🟡 MED"
-
-# ---------------- SIGNALS ---------------- #
+# ==============================
+# SIGNALS
+# ==============================
 
 signals = []
-
 for i, row in df.iterrows():
-
-    if market_mode == "RISK-OFF":
-        if row["Momentum"] < -0.002:
-            signal = "REDUCE"
-        else:
-            signal = "WAIT"
-
-    elif market_mode == "NEUTRAL":
-        if i == 0 and row["Momentum"] > 0:
-            signal = "BUY"
-        else:
-            signal = "WAIT"
-
-    else:  # RISK-ON
-        if i < 2 and row["Momentum"] > 0:
+    if market_mode == "DEFENSIVE":
+        signal = "REDUCE" if row["Momentum"] < 0 else "HOLD"
+    else:
+        if i < 2:
             signal = "BUY"
         elif row["Momentum"] < -0.003:
             signal = "REDUCE"
         else:
-            signal = "WAIT"
-
+            signal = "HOLD"
     signals.append(signal)
 
 df["Signal"] = signals
-df["Confidence"] = confidence
 
+# ==============================
+# DISPLAY
+# ==============================
 
-# ---------------- DISPLAY TABLE ---------------- #
-
-st.subheader("📊 ETF Rankings (Last 120 Minutes)")
+st.markdown("## 📊 Portfolio & Rotation Signals")
 
 def color_signal(val):
     if val == "BUY":
-        return "background-color: #b6f2c2"
+        return "background-color:#b6f2c2"
     if val == "REDUCE":
-        return "background-color: #f7b2b2"
+        return "background-color:#f7b2b2"
     return ""
 
 styled = df.style.format({
     "Momentum": "{:.2%}",
-    "RelStrength": "{:.2%}",
     "Volatility": "{:.4f}",
+    "Price": "${:.2f}",
+    "Value": "${:,.0f}",
+    "Weight": "{:.1%}",
     "Score": "{:.1f}"
 }).applymap(color_signal, subset=["Signal"])
 
 st.dataframe(styled, use_container_width=True)
+st.metric("💼 Portfolio Value", f"${total_value:,.0f}")
 
+# ==============================
+# ROTATION PLAN
+# ==============================
 
-# ---------------- CHARTS ---------------- #
+st.markdown("## 🔄 What To Do Now")
 
-st.subheader("📈 Last 120-Minute % Price Movement")
+buys = df[df["Signal"] == "BUY"]
+sells = df[df["Signal"] == "REDUCE"]
 
-for etf in df["ETF"]:
-    if etf in charts:
-        st.markdown(f"**{etf} — % move from 120-min start**")
-        st.line_chart(charts[etf], height=140)
-
-
-# ---------------- EXPLANATION ---------------- #
-
-top = df.iloc[0]
-
-if market_mode == "RISK-OFF":
-    explanation = "🔴 Market weakness into close. Avoid adding risk. Reduce weakest positions only."
-elif market_mode == "NEUTRAL":
-    explanation = f"🟡 Mixed market. Only {top['ETF']} shows mild strength. Best to wait or add small."
+if len(buys) == 0 and len(sells) == 0:
+    st.info("No strong rotation needed today.")
 else:
-    explanation = f"🟢 Strong close momentum. Best reinvestment: {df.iloc[0]['ETF']} and {df.iloc[1]['ETF']}."
+    if len(sells):
+        for _, r in sells.iterrows():
+            sell_amt = max(1, int(r["Shares"] * 0.15))
+            st.error(f"🔴 Reduce {r['ETF']} → sell ~{sell_amt} shares")
 
-st.info(f"{explanation}\n\nConfidence: {confidence}")
+    if len(buys):
+        cash_each = cash_to_reinvest / len(buys)
+        for _, r in buys.iterrows():
+            buy_shares = int(cash_each // r["Price"])
+            st.success(f"🟢 Add {r['ETF']} → buy ~{buy_shares} shares")
 
-st.caption("Signals based on last 120 minutes of intraday momentum and relative strength vs QQQ.")
+st.caption("Uses momentum + income weighting + portfolio exposure. Designed for weekly income rotation.")
