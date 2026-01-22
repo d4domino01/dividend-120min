@@ -8,8 +8,8 @@ from datetime import datetime
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3", layout="centered")
-st.title("🔥 Income Strategy Engine v3")
+st.set_page_config(page_title="Income Engine v3.1", layout="centered")
+st.title("🔥 Income Strategy Engine v3.1")
 st.caption("Ex-date timing • market stress mode • income optimization")
 
 # ==================================================
@@ -19,7 +19,8 @@ st.caption("Ex-date timing • market stress mode • income optimization")
 ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
 BENCH = "QQQ"
 INCOME_LOOKBACK_MONTHS = 4
-TARGET_MONTHLY_INCOME = 1000
+TARGET1 = 1000
+TARGET2 = 2000
 WINDOW_MINUTES = 120
 
 # ==================================================
@@ -61,12 +62,14 @@ def get_price(ticker):
 @st.cache_data(ttl=3600)
 def get_recent_dividends(ticker, months=4):
     try:
-        divs = yf.Ticker(ticker).dividends
-        if divs is None or divs.empty:
+        hist = yf.download(ticker, period="6mo", interval="1d", actions=True, progress=False)
+        if hist is None or "Dividends" not in hist or hist["Dividends"].sum() == 0:
             return 0.0, 0.0, None
 
-        divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
-        cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
+        divs = hist["Dividends"]
+        divs.index = pd.to_datetime(divs.index).tz_localize(None)
+
+        cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
         recent = divs[divs.index >= cutoff]
 
         last_ex = divs.index.max()
@@ -75,8 +78,7 @@ def get_recent_dividends(ticker, months=4):
             return 0.0, 0.0, last_ex
 
         total = recent.sum()
-        days = max((divs.index.max() - cutoff).days, 1)
-        monthly_avg = total / days * 30
+        monthly_avg = total / months
 
         return float(total), float(monthly_avg), last_ex
     except:
@@ -114,7 +116,7 @@ def get_volatility(ticker):
         return np.nan
 
 # ==================================================
-# MARKET MODE (NO CRASH VERSION)
+# MARKET MODE
 # ==================================================
 
 bench_chg = get_intraday_change(BENCH)
@@ -162,7 +164,7 @@ for etf in ETF_LIST:
     total_annual_divs += inc * 12
 
     zone = "HOLD"
-    if last_ex:
+    if last_ex is not None:
         days = (pd.Timestamp.now() - last_ex).days
         if days <= 2:
             zone = "BUY"
@@ -178,7 +180,7 @@ st.markdown("## 📊 Portfolio Snapshot")
 c1,c2,c3 = st.columns(3)
 c1.metric("Portfolio Value", f"${total_value:,.0f}")
 c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-c3.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
+c3.metric("Progress to $1k/mo", f"{(total_monthly_income/TARGET1*100) if TARGET1>0 else 0:.1f}%")
 
 disp = df.copy()
 disp["Price"] = disp["Price"].map("${:,.2f}".format)
@@ -220,7 +222,7 @@ if holds:
 
 st.markdown("## 🧩 Fastest Path to $1k Optimizer")
 
-if len(df) > 0:
+if len(df) > 0 and total_value > 0:
     df["Yield"] = (df["Monthly Income"]*12) / df["Value"]
     max_y = df["Yield"].max()
     max_v = df["Volatility"].max()
@@ -242,35 +244,45 @@ else:
     st.info("Optimizer unavailable — no valid ETF data.")
 
 # ==================================================
-# AFTER $1K SIMULATOR
+# TIERED INCOME SIMULATOR (REALISTIC)
 # ==================================================
 
-st.markdown("## 🔁 After $1k Strategy Simulator")
-
-mode = st.selectbox("After reaching $1k/mo:", ["Reinvest 100%", "Reinvest 70%", "Withdraw $400/mo"])
+st.markdown("## 🎯 Income Milestone Simulator (Realistic)")
 
 if total_value > 0 and total_monthly_income > 0:
+
     avg_yield = total_monthly_income * 12 / total_value
 
-    proj_income = total_monthly_income
     proj_value = total_value
+    proj_income = total_monthly_income
 
-    for _ in range(180):
-        if proj_income < TARGET_MONTHLY_INCOME:
+    months_to_1k = None
+    months_to_2k = None
+
+    for m in range(1, 241):  # 20 years
+
+        if proj_income < TARGET1:
             reinv = proj_income
+        elif proj_income < TARGET2:
+            reinv = proj_income * 0.5
         else:
-            if mode == "Reinvest 100%":
-                reinv = proj_income
-            elif mode == "Reinvest 70%":
-                reinv = proj_income * 0.7
-            else:
-                reinv = max(0, proj_income - 400)
+            reinv = proj_income * 0.2
 
         proj_value += monthly_contribution + reinv
         proj_income = proj_value * avg_yield / 12
 
-    st.metric("Projected Income After 15y", f"${proj_income:,.0f}/mo")
-    st.metric("Projected Portfolio After 15y", f"${proj_value:,.0f}")
+        if months_to_1k is None and proj_income >= TARGET1:
+            months_to_1k = m
+        if months_to_2k is None and proj_income >= TARGET2:
+            months_to_2k = m
+
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Months to $1k/mo", months_to_1k if months_to_1k else "—")
+    c2.metric("Months to $2k/mo", months_to_2k if months_to_2k else "—")
+    c3.metric("Income After 20y", f"${proj_income:,.0f}/mo")
+
+    st.metric("Portfolio After 20y", f"${proj_value:,.0f}")
+
 else:
     st.info("Simulator unavailable — income data missing.")
 
