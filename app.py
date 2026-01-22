@@ -19,6 +19,7 @@ ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
 BENCH = "QQQ"
 WINDOW = 120
 INCOME_LOOKBACK_MONTHS = 4
+TARGET_MONTHLY_INCOME = 1000
 
 # =========================
 # USER HOLDINGS INPUT
@@ -39,6 +40,15 @@ for i, etf in enumerate(ETF_LIST):
             value=int(default_vals.get(etf, 0)),
             step=1
         )
+
+st.markdown("## 💰 Monthly New Investment")
+
+monthly_contribution = st.number_input(
+    "Extra cash invested per month ($)",
+    min_value=0,
+    value=200,
+    step=50
+)
 
 # =========================
 # HELPERS
@@ -134,7 +144,7 @@ else:
 st.metric("QQQ (intraday)", f"{bench_chg*100:.2f}%")
 
 # =========================
-# PORTFOLIO SNAPSHOT (ALWAYS WORKS)
+# PORTFOLIO SNAPSHOT
 # =========================
 
 rows = []
@@ -166,7 +176,7 @@ st.markdown("## 📊 Portfolio Snapshot")
 c1, c2, c3 = st.columns(3)
 c1.metric("Portfolio Value", f"${total_value:,.0f}")
 c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-c3.metric("Progress to $1k/mo", f"{total_monthly_income/1000*100:.1f}%")
+c3.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
 
 if not portfolio_df.empty:
     portfolio_df["Price (Last Close)"] = portfolio_df["Price (Last Close)"].map("${:,.2f}".format)
@@ -174,6 +184,34 @@ if not portfolio_df.empty:
     portfolio_df["Monthly Income"] = portfolio_df["Monthly Income"].map("${:,.0f}".format)
 
 st.dataframe(portfolio_df, use_container_width=True)
+
+# =========================
+# INCOME TARGET FORECAST
+# =========================
+
+st.markdown("## 🎯 Income Target Forecast")
+
+if total_monthly_income > 0:
+    avg_yield = total_monthly_income * 12 / total_value if total_value > 0 else 0
+
+    months = 0
+    proj_value = total_value
+    proj_income = total_monthly_income
+
+    while proj_income < TARGET_MONTHLY_INCOME and months < 600:
+        proj_value += monthly_contribution
+        proj_value += proj_income  # reinvest dividends monthly
+        proj_income = proj_value * avg_yield / 12
+        months += 1
+
+    years = months / 12
+
+    st.metric("Estimated months to $1,000/mo", f"{months}")
+    st.metric("Estimated years to $1,000/mo", f"{years:.1f}")
+    st.metric("Assumed portfolio yield", f"{avg_yield*100:.1f}%")
+
+else:
+    st.warning("Income data unavailable for forecast.")
 
 # =========================
 # MOMENTUM ENGINE (OPTIONAL)
@@ -241,4 +279,4 @@ elif market_mode in ["AGGRESSIVE", "NEUTRAL"]:
 else:
     st.info("Rotation signals unavailable until intraday data resumes.")
 
-st.caption("Income uses last 4 months of REAL distributions. Momentum uses last ~120 minutes when available.")
+st.caption("Income uses last 4 months of REAL distributions. Forecast assumes constant yield and full reinvestment.")
