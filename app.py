@@ -56,11 +56,6 @@ monthly_contribution = st.number_input(
 
 @st.cache_data(ttl=900)
 def get_recent_momentum(ticker):
-    """
-    Tries 1-min candles first (last 120 mins).
-    If unavailable, falls back to 5-min candles (last 10 hours).
-    """
-
     # ----- TRY 1 MIN DATA -----
     try:
         data = yf.download(ticker, period="2d", interval="1m", progress=False)
@@ -70,8 +65,8 @@ def get_recent_momentum(ticker):
             end = float(recent["Close"].iloc[-1])
             pct = (end - start) / start
             vol = recent["Close"].pct_change().std()
-            if not pd.isna(pct):
-                return pct, vol, "1m"
+            if pd.notna(pct):
+                return pct, vol
     except Exception:
         pass
 
@@ -84,12 +79,12 @@ def get_recent_momentum(ticker):
             end = float(recent["Close"].iloc[-1])
             pct = (end - start) / start
             vol = recent["Close"].pct_change().std()
-            if not pd.isna(pct):
-                return pct, vol, "5m"
+            if pd.notna(pct):
+                return pct, vol
     except Exception:
         pass
 
-    return None, None, None
+    return None, None
 
 
 @st.cache_data(ttl=3600)
@@ -131,14 +126,14 @@ def get_last_close_price(ticker):
         return None
 
 # =========================
-# MARKET MODE (BENCHMARK)
+# MARKET MODE
 # =========================
 
-bench_chg, _, bench_tf = get_recent_momentum(BENCH)
+bench_chg, _ = get_recent_momentum(BENCH)
 
 if bench_chg is None:
     market_mode = "UNKNOWN"
-    st.info("Recent intraday data unavailable — using income-only mode.")
+    st.info("Recent intraday data unavailable — momentum signals paused.")
     bench_chg = 0.0
 else:
     if bench_chg > 0.003:
@@ -157,7 +152,7 @@ elif market_mode == "NEUTRAL":
 else:
     st.info("⚪ MARKET MODE: UNAVAILABLE")
 
-st.metric(f"QQQ momentum ({bench_tf or 'n/a'})", f"{bench_chg*100:.2f}%")
+st.metric("QQQ momentum", f"{bench_chg*100:.2f}%")
 
 # =========================
 # PORTFOLIO SNAPSHOT
@@ -235,20 +230,18 @@ else:
 st.markdown("## ⚡ Momentum Ranking (Recent Candles)")
 
 mom_rows = []
-timeframes = set()
 
 for etf in ETF_LIST:
-    chg, vol, tf = get_recent_momentum(etf)
+    chg, vol = get_recent_momentum(etf)
     if chg is None:
         continue
-    mom_rows.append([etf, chg, vol, tf])
-    timeframes.add(tf)
+    mom_rows.append([etf, chg, vol])
 
 if len(mom_rows) == 0:
     st.info("No recent intraday data available yet.")
     mom_df = pd.DataFrame(columns=["ETF", "Momentum", "Volatility", "Signal"])
 else:
-    mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility", "TF"])
+    mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
     mom_df = mom_df.sort_values("Momentum", ascending=False).reset_index(drop=True)
 
     signals = []
@@ -265,10 +258,14 @@ else:
         signals.append(sig)
 
     mom_df["Signal"] = signals
-    mom_df["Momentum"] = mom_df["Momentum"].apply(lambda x: f"{x:.2%}")
-    mom_df["Volatility"] = mom_df["Volatility"].apply(lambda x: f"{x:.4f}")
 
-    mom_df = mom_df.drop(columns=["TF"])
+    # SAFE FORMATTING (NO CRASH)
+    mom_df["Momentum"] = mom_df["Momentum"].apply(
+        lambda x: f"{x:.2%}" if pd.notna(x) else "—"
+    )
+    mom_df["Volatility"] = mom_df["Volatility"].apply(
+        lambda x: f"{x:.4f}" if pd.notna(x) else "—"
+    )
 
 st.dataframe(mom_df, use_container_width=True)
 
@@ -297,4 +294,4 @@ elif market_mode in ["AGGRESSIVE", "NEUTRAL"]:
 else:
     st.info("Rotation signals unavailable.")
 
-st.caption("Momentum uses 1-min candles when available, otherwise 5-min candles from the last sessions.")
+st.caption("Momentum uses recent intraday candles with automatic fallback and NaN protection.")
