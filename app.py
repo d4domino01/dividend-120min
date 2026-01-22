@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ==================================================
 # PAGE
@@ -43,17 +43,20 @@ st.markdown("## 🧾 Total Contributions So Far")
 total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000, 10000, 500)
 
 # ==================================================
-# HELPERS (SAFE)
+# SAFE HELPERS
 # ==================================================
 
 @st.cache_data(ttl=600)
 def get_price(ticker):
     try:
         d = yf.download(ticker, period="5d", interval="1d", progress=False)
-        if d is None or d.empty: return None
-        return float(d["Close"].iloc[-1])
+        if d is None or d.empty:
+            return None
+        v = float(d["Close"].iloc[-1])
+        return v if np.isfinite(v) else None
     except:
         return None
+
 
 @st.cache_data(ttl=3600)
 def get_recent_dividends(ticker, months=4):
@@ -66,17 +69,19 @@ def get_recent_dividends(ticker, months=4):
         cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
         recent = divs[divs.index >= cutoff]
 
+        last_ex = divs.index.max()
+
         if recent.empty:
-            last = divs.index.max()
-            return 0.0, 0.0, last
+            return 0.0, 0.0, last_ex
 
         total = recent.sum()
         days = max((divs.index.max() - cutoff).days, 1)
         monthly_avg = total / days * 30
-        last_ex = divs.index.max()
+
         return float(total), float(monthly_avg), last_ex
     except:
         return 0.0, 0.0, None
+
 
 @st.cache_data(ttl=300)
 def get_intraday_change(ticker):
@@ -84,27 +89,37 @@ def get_intraday_change(ticker):
         d = yf.download(ticker, period="1d", interval="1m", progress=False)
         if d is None or len(d) < WINDOW_MINUTES:
             return None
+
         r = d.tail(WINDOW_MINUTES)
-        return (r["Close"].iloc[-1] - r["Close"].iloc[0]) / r["Close"].iloc[0]
+        start = float(r["Close"].iloc[0])
+        end = float(r["Close"].iloc[-1])
+
+        if not np.isfinite(start) or not np.isfinite(end) or start == 0:
+            return None
+
+        return (end - start) / start
     except:
         return None
+
 
 @st.cache_data(ttl=3600)
 def get_volatility(ticker):
     try:
         d = yf.download(ticker, period="6mo", interval="1d", progress=False)
-        if d is None or len(d) < 30: return np.nan
-        return d["Close"].pct_change().std()
+        if d is None or len(d) < 30:
+            return np.nan
+        v = d["Close"].pct_change().std()
+        return float(v) if np.isfinite(v) else np.nan
     except:
         return np.nan
 
 # ==================================================
-# MARKET MODE
+# MARKET MODE (NO CRASH VERSION)
 # ==================================================
 
 bench_chg = get_intraday_change(BENCH)
 
-if bench_chg is None:
+if bench_chg is None or not np.isfinite(bench_chg):
     market_mode = "UNAVAILABLE"
 elif bench_chg < -0.01:
     market_mode = "STRESS"
@@ -120,7 +135,7 @@ elif market_mode == "DEFENSIVE":
 elif market_mode == "NORMAL":
     st.success("🟢 NORMAL MODE — income-first strategy")
 else:
-    st.info("⚪ Market data unavailable — income only")
+    st.info("⚪ Market data unavailable — momentum paused")
 
 # ==================================================
 # PORTFOLIO
@@ -134,7 +149,8 @@ total_annual_divs = 0
 for etf in ETF_LIST:
     sh = holdings.get(etf,0)
     price = get_price(etf)
-    if price is None: continue
+    if price is None:
+        continue
 
     val = sh * price
     _, m_inc, last_ex = get_recent_dividends(etf, INCOME_LOOKBACK_MONTHS)
@@ -145,7 +161,6 @@ for etf in ETF_LIST:
     total_monthly_income += inc
     total_annual_divs += inc * 12
 
-    # ex-date window logic (approx weekly cycle)
     zone = "HOLD"
     if last_ex:
         days = (pd.Timestamp.now() - last_ex).days
@@ -185,10 +200,8 @@ for _, r in df.iterrows():
     if r["Cycle Zone"] == "BUY":
         buys.append(r["ETF"])
     elif r["Cycle Zone"] == "SELL":
-        if market_mode in ["STRESS"]:
+        if market_mode == "STRESS":
             trims.append(r["ETF"])
-        elif market_mode == "NORMAL":
-            holds.append(r["ETF"])
         else:
             holds.append(r["ETF"])
     else:
@@ -207,16 +220,26 @@ if holds:
 
 st.markdown("## 🧩 Fastest Path to $1k Optimizer")
 
-df["Yield"] = (df["Monthly Income"]*12) / df["Value"]
-df["Score"] = (df["Yield"]/df["Yield"].max())*0.7 + (1-(df["Volatility"]/df["Volatility"].max()))*0.3
-df["Opt %"] = df["Score"] / df["Score"].sum() * 100
+if len(df) > 0:
+    df["Yield"] = (df["Monthly Income"]*12) / df["Value"]
+    max_y = df["Yield"].max()
+    max_v = df["Volatility"].max()
 
-opt = df[["ETF","Yield","Volatility","Opt %"]].copy()
-opt["Yield"] = opt["Yield"].map("{:.1%}".format)
-opt["Volatility"] = opt["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
-opt["Opt %"] = opt["Opt %"].map("{:.1f}%".format)
+    df["Score"] = (
+        (df["Yield"]/max_y if max_y > 0 else 0)*0.7 +
+        (1-(df["Volatility"]/max_v) if max_v > 0 else 0)*0.3
+    )
 
-st.dataframe(opt, use_container_width=True)
+    df["Opt %"] = df["Score"] / df["Score"].sum() * 100
+
+    opt = df[["ETF","Yield","Volatility","Opt %"]].copy()
+    opt["Yield"] = opt["Yield"].map("{:.1%}".format)
+    opt["Volatility"] = opt["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
+    opt["Opt %"] = opt["Opt %"].map("{:.1f}%".format)
+
+    st.dataframe(opt, use_container_width=True)
+else:
+    st.info("Optimizer unavailable — no valid ETF data.")
 
 # ==================================================
 # AFTER $1K SIMULATOR
@@ -226,29 +249,30 @@ st.markdown("## 🔁 After $1k Strategy Simulator")
 
 mode = st.selectbox("After reaching $1k/mo:", ["Reinvest 100%", "Reinvest 70%", "Withdraw $400/mo"])
 
-avg_yield = total_monthly_income * 12 / total_value if total_value > 0 else 0
+if total_value > 0 and total_monthly_income > 0:
+    avg_yield = total_monthly_income * 12 / total_value
 
-proj_income = total_monthly_income
-proj_value = total_value
+    proj_income = total_monthly_income
+    proj_value = total_value
 
-months = 0
-while months < 180:
-    if proj_income < TARGET_MONTHLY_INCOME:
-        reinv = proj_income
-    else:
-        if mode == "Reinvest 100%":
+    for _ in range(180):
+        if proj_income < TARGET_MONTHLY_INCOME:
             reinv = proj_income
-        elif mode == "Reinvest 70%":
-            reinv = proj_income * 0.7
         else:
-            reinv = max(0, proj_income - 400)
+            if mode == "Reinvest 100%":
+                reinv = proj_income
+            elif mode == "Reinvest 70%":
+                reinv = proj_income * 0.7
+            else:
+                reinv = max(0, proj_income - 400)
 
-    proj_value += monthly_contribution + reinv
-    proj_income = proj_value * avg_yield / 12
-    months += 1
+        proj_value += monthly_contribution + reinv
+        proj_income = proj_value * avg_yield / 12
 
-st.metric("Projected Income After 15y", f"${proj_income:,.0f}/mo")
-st.metric("Projected Portfolio After 15y", f"${proj_value:,.0f}")
+    st.metric("Projected Income After 15y", f"${proj_income:,.0f}/mo")
+    st.metric("Projected Portfolio After 15y", f"${proj_value:,.0f}")
+else:
+    st.info("Simulator unavailable — income data missing.")
 
 # ==================================================
 # TRUE RETURNS
