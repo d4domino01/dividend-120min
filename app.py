@@ -2,158 +2,205 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Income Sprint Engine", layout="centered")
-st.title("🔥 Income Sprint Engine — $1,000/Month Target")
-st.caption("Aggressive income compounding with controlled weekly rotation")
+# =========================
+# PAGE
+# =========================
 
-# ======================================================
-# ETF SETUP
-# ======================================================
+st.set_page_config(page_title="Income ETF Rotation Engine", layout="centered")
+st.title("🔥 Income ETF Power-Hour Decision Engine")
+st.caption("Momentum + REAL income-based dividend tracking")
 
-ETFS = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
+# =========================
+# SETTINGS
+# =========================
 
-# Target allocation for INCOME SPRINT MODE
-TARGET_ALLOC = {
-    "CHPY": 0.30,
-    "QDTE": 0.25,
-    "XDTE": 0.20,
-    "JEPQ": 0.15,
-    "AIPI": 0.10
-}
+ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
+BENCH = "QQQ"
+WINDOW = 120
+INCOME_LOOKBACK_MONTHS = 4
 
-st.markdown("## 📥 Your Current Holdings (Shares)")
+# =========================
+# USER HOLDINGS INPUT
+# =========================
 
-c1, c2, c3 = st.columns(3)
-with c1:
-    CHPY = st.number_input("CHPY Shares", value=55, step=1)
-    QDTE = st.number_input("QDTE Shares", value=110, step=1)
-with c2:
-    XDTE = st.number_input("XDTE Shares", value=69, step=1)
-    JEPQ = st.number_input("JEPQ Shares", value=19, step=1)
-with c3:
-    AIPI = st.number_input("AIPI Shares", value=14, step=1)
+st.markdown("## 📥 Your Actual Holdings")
 
-holdings = {"CHPY": CHPY, "QDTE": QDTE, "XDTE": XDTE, "JEPQ": JEPQ, "AIPI": AIPI}
+holdings = {}
+cols = st.columns(len(ETF_LIST))
 
-cash = st.number_input("💵 Cash Available for Reinvest ($)", value=0, step=50)
+for i, etf in enumerate(ETF_LIST):
+    with cols[i]:
+        holdings[etf] = st.number_input(f"{etf} Shares", min_value=0, value=0, step=1)
 
-st.markdown("---")
+# =========================
+# HELPERS
+# =========================
 
-# ======================================================
-# DATA
-# ======================================================
+@st.cache_data(ttl=300)
+def get_intraday_change(ticker):
+    data = yf.download(ticker, period="1d", interval="1m", progress=False)
+    if data is None or len(data) < WINDOW:
+        return None, None
 
-@st.cache_data(ttl=600)
-def get_data(ticker):
-    price = yf.download(ticker, period="1d", interval="1m", progress=False)["Close"].iloc[-1]
-    divs = yf.Ticker(ticker).dividends.tail(4)
-    if len(divs) == 0:
-        monthly = 0
-    else:
-        avg = divs.mean()
-        freq = 4 if len(divs) >= 4 else 1
-        monthly = avg * freq / 12
-    return float(price), float(monthly)
+    recent = data.tail(WINDOW)
+    start_price = float(recent["Close"].iloc[0])
+    end_price = float(recent["Close"].iloc[-1])
+    pct = (end_price - start_price) / start_price
+    vol = recent["Close"].pct_change().std()
+
+    return pct, vol
+
+
+@st.cache_data(ttl=3600)
+def get_recent_dividends(ticker, months=4):
+    stock = yf.Ticker(ticker)
+    divs = stock.dividends
+
+    if divs.empty:
+        return 0, 0
+
+    cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
+    recent = divs[divs.index >= cutoff]
+
+    total = recent.sum()
+    monthly_avg = total / months
+
+    return float(total), float(monthly_avg)
+
+
+@st.cache_data(ttl=300)
+def get_price(ticker):
+    data = yf.download(ticker, period="1d", interval="1m", progress=False)
+    if len(data) == 0:
+        return None
+    return float(data["Close"].iloc[-1])
+
+# =========================
+# MARKET MODE
+# =========================
+
+bench_chg, _ = get_intraday_change(BENCH)
+
+if bench_chg is None:
+    st.warning("Market data not available yet. Try later in session.")
+    st.stop()
+
+if bench_chg > 0.003:
+    market_mode = "AGGRESSIVE"
+elif bench_chg < -0.003:
+    market_mode = "DEFENSIVE"
+else:
+    market_mode = "NEUTRAL"
+
+if market_mode == "AGGRESSIVE":
+    st.success("🟢 MARKET MODE: AGGRESSIVE (risk-on)")
+elif market_mode == "DEFENSIVE":
+    st.error("🔴 MARKET MODE: DEFENSIVE (risk-off)")
+else:
+    st.warning("🟡 MARKET MODE: NEUTRAL")
+
+st.metric("QQQ (last 2h)", f"{bench_chg*100:.2f}%")
+
+# =========================
+# PORTFOLIO SNAPSHOT
+# =========================
 
 rows = []
 total_value = 0
-total_income = 0
+total_monthly_income = 0
 
-for etf in ETFS:
-    price, monthly_div = get_data(etf)
-    shares = holdings[etf]
+for etf in ETF_LIST:
+    shares = holdings.get(etf, 0)
+    price = get_price(etf)
+
+    if price is None:
+        continue
+
     value = shares * price
-    income = shares * monthly_div
+    _, monthly_income = get_recent_dividends(etf, INCOME_LOOKBACK_MONTHS)
+    income = monthly_income * shares
+
     total_value += value
-    total_income += income
-    rows.append([etf, shares, price, value, monthly_div, income])
+    total_monthly_income += income
 
-df = pd.DataFrame(rows, columns=[
-    "ETF", "Shares", "Price", "Value", "Monthly Div/Share", "Monthly Income"
+    rows.append([
+        etf, shares, price, value, income
+    ])
+
+portfolio_df = pd.DataFrame(rows, columns=[
+    "ETF", "Shares", "Price", "Value", "Monthly Income"
 ])
-
-df["Alloc %"] = df["Value"] / total_value
-df["Target %"] = df["ETF"].map(TARGET_ALLOC)
-df["Drift %"] = df["Alloc %"] - df["Target %"]
-
-# ======================================================
-# PORTFOLIO SUMMARY
-# ======================================================
 
 st.markdown("## 📊 Portfolio Snapshot")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Portfolio Value", f"${total_value:,.0f}")
-c2.metric("Monthly Income", f"${total_income:,.0f}")
-c3.metric("Progress to $1k/mo", f"{total_income/1000*100:.1f}%")
+col1, col2, col3 = st.columns(3)
+col1.metric("Portfolio Value", f"${total_value:,.0f}")
+col2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
+col3.metric("Progress to $1k/mo", f"{total_monthly_income/1000*100:.1f}%")
 
-st.dataframe(df.style.format({
-    "Price": "${:.2f}",
-    "Value": "${:,.0f}",
-    "Monthly Div/Share": "${:.2f}",
-    "Monthly Income": "${:,.0f}",
-    "Alloc %": "{:.1%}",
-    "Target %": "{:.0%}",
-    "Drift %": "{:+.1%}"
-}), use_container_width=True)
+portfolio_df["Price"] = portfolio_df["Price"].map("${:,.2f}".format)
+portfolio_df["Value"] = portfolio_df["Value"].map("${:,.0f}".format)
+portfolio_df["Monthly Income"] = portfolio_df["Monthly Income"].map("${:,.0f}".format)
 
-# ======================================================
-# WEEKLY REBALANCE ENGINE
-# ======================================================
+st.dataframe(portfolio_df, use_container_width=True)
 
-st.markdown("## 🔄 Weekly Rebalance Engine")
+# =========================
+# MOMENTUM ENGINE
+# =========================
 
-if st.button("▶ Run Weekly Rebalance"):
+st.markdown("## ⚡ End-of-Day Momentum Ranking")
 
-    actions = []
+mom_rows = []
 
-    for _, r in df.iterrows():
+for etf in ETF_LIST:
+    chg, vol = get_intraday_change(etf)
+    if chg is None:
+        continue
+    mom_rows.append([etf, chg, vol])
 
-        etf = r["ETF"]
-        drift = r["Drift %"]
-        price = r["Price"]
+mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
+mom_df = mom_df.sort_values("Momentum", ascending=False).reset_index(drop=True)
 
-        # SELL if overweight > 10%
-        if drift > 0.10:
-            sell_value = total_value * (drift - 0.05)
-            sell_shares = int(sell_value // price)
-            if sell_shares > 0:
-                actions.append(["SELL", etf, sell_shares])
-
-        # BUY if underweight > 8%
-        elif drift < -0.08:
-            buy_value = min(cash, total_value * abs(drift))
-            buy_shares = int(buy_value // price)
-            if buy_shares > 0:
-                actions.append(["BUY", etf, buy_shares])
-
-    if not actions:
-        st.success("✅ Portfolio within balance — no rotation needed this week.")
+signals = []
+for i, row in mom_df.iterrows():
+    if market_mode == "DEFENSIVE":
+        sig = "REDUCE" if row["Momentum"] < 0 else "WAIT"
     else:
-        st.warning("⚠ Suggested Actions:")
-        act_df = pd.DataFrame(actions, columns=["Action", "ETF", "Shares"])
-        st.dataframe(act_df, use_container_width=True)
+        if i < 2:
+            sig = "BUY"
+        elif row["Momentum"] < -0.003:
+            sig = "REDUCE"
+        else:
+            sig = "WAIT"
+    signals.append(sig)
 
-# ======================================================
-# WEEKLY SNAPSHOT EXPORT
-# ======================================================
+mom_df["Signal"] = signals
 
-st.markdown("## 📤 Weekly Snapshot Export")
+mom_df["Momentum"] = mom_df["Momentum"].map("{:.2%}".format)
+mom_df["Volatility"] = mom_df["Volatility"].map("{:.4f}".format)
 
-snapshot = df.copy()
-snapshot["Date"] = datetime.now().strftime("%Y-%m-%d")
-snapshot["Portfolio Value"] = total_value
-snapshot["Total Monthly Income"] = total_income
+st.dataframe(mom_df, use_container_width=True)
 
-csv = snapshot.to_csv(index=False)
+# =========================
+# ROTATION SUGGESTION
+# =========================
 
-st.download_button(
-    "⬇ Download Weekly Snapshot CSV",
-    csv,
-    f"income_snapshot_{datetime.now().strftime('%Y-%m-%d')}.csv",
-    "text/csv"
-)
+st.markdown("## 🔄 Weekly Rotation Guidance")
 
-st.caption("Designed for aggressive income growth with controlled weekly rotation.")
+buys = mom_df[mom_df["Signal"] == "BUY"]["ETF"].tolist()
+reduces = mom_df[mom_df["Signal"] == "REDUCE"]["ETF"].tolist()
+
+if market_mode == "DEFENSIVE":
+    st.error("Risk-off environment — protect capital and income.")
+    if reduces:
+        st.write("🔻 Consider trimming:", ", ".join(reduces))
+else:
+    if buys:
+        st.success("🔥 Best reinvestment targets this week:")
+        st.write(", ".join(buys))
+    else:
+        st.info("No strong momentum edge. Hold and collect income.")
+
+st.caption("Income based on REAL distributions from last 4 months. Momentum based on last 120 minutes.")
