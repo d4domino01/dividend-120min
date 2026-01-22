@@ -157,5 +157,3 @@ st.download_button(
 )
 
 st.caption("Designed for aggressive income growth with controlled weekly rotation.")
-
-Sent from Outlook for Android
