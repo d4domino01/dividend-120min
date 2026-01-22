@@ -2,274 +2,280 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# =========================
+# ==================================================
 # PAGE
-# =========================
+# ==================================================
 
-st.set_page_config(page_title="Income Portfolio Engine", layout="centered")
-st.title("🔥 Income Portfolio Control Center")
-st.caption("Income • true returns • smart rebalance • allocation optimizer")
+st.set_page_config(page_title="Income Engine v3", layout="centered")
+st.title("🔥 Income Strategy Engine v3")
+st.caption("Ex-date timing • market stress mode • income optimization")
 
-# =========================
+# ==================================================
 # SETTINGS
-# =========================
+# ==================================================
 
 ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
+BENCH = "QQQ"
 INCOME_LOOKBACK_MONTHS = 4
 TARGET_MONTHLY_INCOME = 1000
+WINDOW_MINUTES = 120
 
-# =========================
+# ==================================================
 # USER INPUTS
-# =========================
+# ==================================================
 
-st.markdown("## 📥 Your Actual Holdings")
+st.markdown("## 📥 Your Holdings")
 
 holdings = {}
 cols = st.columns(len(ETF_LIST))
-
-default_vals = {"CHPY": 55, "QDTE": 110, "XDTE": 69, "JEPQ": 19, "AIPI": 14}
+default_vals = {"CHPY":55,"QDTE":110,"XDTE":69,"JEPQ":19,"AIPI":14}
 
 for i, etf in enumerate(ETF_LIST):
     with cols[i]:
-        holdings[etf] = st.number_input(
-            f"{etf} Shares",
-            min_value=0,
-            value=int(default_vals.get(etf, 0)),
-            step=1
-        )
+        holdings[etf] = st.number_input(f"{etf} Shares", 0, 100000, default_vals.get(etf,0), 1)
 
-st.markdown("## 💰 Monthly New Investment")
+st.markdown("## 💰 Monthly Investment")
+monthly_contribution = st.number_input("Monthly cash added ($)", 0, 5000, 200, 50)
 
-monthly_contribution = st.number_input(
-    "Cash invested per month ($)",
-    min_value=0,
-    value=200,
-    step=50
-)
+st.markdown("## 🧾 Total Contributions So Far")
+total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000, 10000, 500)
 
-st.markdown("## 🧾 Lifetime Contributions So Far")
+# ==================================================
+# HELPERS (SAFE)
+# ==================================================
 
-total_contributions = st.number_input(
-    "Total cash you have invested so far ($)",
-    min_value=0,
-    value=10000,
-    step=500
-)
-
-# =========================
-# TARGET ALLOCATIONS
-# =========================
-
-st.markdown("## 🎯 Your Target Allocation (%)")
-
-alloc_cols = st.columns(len(ETF_LIST))
-targets = {}
-
-default_targets = {"CHPY": 30, "QDTE": 25, "XDTE": 20, "JEPQ": 15, "AIPI": 10}
-
-for i, etf in enumerate(ETF_LIST):
-    with alloc_cols[i]:
-        targets[etf] = st.number_input(
-            f"{etf} %",
-            min_value=0,
-            max_value=100,
-            value=int(default_targets.get(etf, 0)),
-            step=5
-        )
-
-total_target = sum(targets.values())
-if total_target != 100:
-    st.warning(f"⚠ Targets must total 100% (currently {total_target}%).")
-
-# =========================
-# HELPERS
-# =========================
+@st.cache_data(ttl=600)
+def get_price(ticker):
+    try:
+        d = yf.download(ticker, period="5d", interval="1d", progress=False)
+        if d is None or d.empty: return None
+        return float(d["Close"].iloc[-1])
+    except:
+        return None
 
 @st.cache_data(ttl=3600)
 def get_recent_dividends(ticker, months=4):
     try:
-        stock = yf.Ticker(ticker)
-        divs = stock.dividends
+        divs = yf.Ticker(ticker).dividends
         if divs is None or divs.empty:
-            return 0.0, 0.0
+            return 0.0, 0.0, None
 
         divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
         cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
         recent = divs[divs.index >= cutoff]
 
         if recent.empty:
-            return 0.0, 0.0
+            last = divs.index.max()
+            return 0.0, 0.0, last
 
         total = recent.sum()
         days = max((divs.index.max() - cutoff).days, 1)
         monthly_avg = total / days * 30
-        return float(total), float(monthly_avg)
-    except Exception:
-        return 0.0, 0.0
+        last_ex = divs.index.max()
+        return float(total), float(monthly_avg), last_ex
+    except:
+        return 0.0, 0.0, None
 
-
-@st.cache_data(ttl=600)
-def get_last_close_price(ticker):
+@st.cache_data(ttl=300)
+def get_intraday_change(ticker):
     try:
-        data = yf.download(ticker, period="5d", interval="1d", progress=False)
-        if data is None or len(data) == 0:
+        d = yf.download(ticker, period="1d", interval="1m", progress=False)
+        if d is None or len(d) < WINDOW_MINUTES:
             return None
-        price = float(data["Close"].iloc[-1])
-        return price if pd.notna(price) else None
-    except Exception:
+        r = d.tail(WINDOW_MINUTES)
+        return (r["Close"].iloc[-1] - r["Close"].iloc[0]) / r["Close"].iloc[0]
+    except:
         return None
 
-
 @st.cache_data(ttl=3600)
-def get_price_volatility(ticker):
+def get_volatility(ticker):
     try:
-        data = yf.download(ticker, period="6mo", interval="1d", progress=False)
-        if data is None or len(data) < 30:
-            return np.nan
-        return data["Close"].pct_change().std()
-    except Exception:
+        d = yf.download(ticker, period="6mo", interval="1d", progress=False)
+        if d is None or len(d) < 30: return np.nan
+        return d["Close"].pct_change().std()
+    except:
         return np.nan
 
-# =========================
-# PORTFOLIO + INCOME
-# =========================
+# ==================================================
+# MARKET MODE
+# ==================================================
+
+bench_chg = get_intraday_change(BENCH)
+
+if bench_chg is None:
+    market_mode = "UNAVAILABLE"
+elif bench_chg < -0.01:
+    market_mode = "STRESS"
+elif bench_chg < -0.003:
+    market_mode = "DEFENSIVE"
+else:
+    market_mode = "NORMAL"
+
+if market_mode == "STRESS":
+    st.error("🔴 MARKET STRESS — aggressive rotation allowed")
+elif market_mode == "DEFENSIVE":
+    st.warning("🟡 DEFENSIVE MODE — partial trims only")
+elif market_mode == "NORMAL":
+    st.success("🟢 NORMAL MODE — income-first strategy")
+else:
+    st.info("⚪ Market data unavailable — income only")
+
+# ==================================================
+# PORTFOLIO
+# ==================================================
 
 rows = []
 total_value = 0
 total_monthly_income = 0
-total_est_annual_divs = 0
+total_annual_divs = 0
 
 for etf in ETF_LIST:
-    shares = holdings.get(etf, 0)
-    price = get_last_close_price(etf)
-    if price is None:
-        continue
+    sh = holdings.get(etf,0)
+    price = get_price(etf)
+    if price is None: continue
 
-    value = shares * price
-    _, monthly_income = get_recent_dividends(etf, INCOME_LOOKBACK_MONTHS)
-    income = monthly_income * shares
-    yield_pct = (monthly_income * 12) / price if price > 0 else 0
-    est_annual_div = income * 12
+    val = sh * price
+    _, m_inc, last_ex = get_recent_dividends(etf, INCOME_LOOKBACK_MONTHS)
+    inc = sh * m_inc
+    vol = get_volatility(etf)
 
-    total_value += value
-    total_monthly_income += income
-    total_est_annual_divs += est_annual_div
+    total_value += val
+    total_monthly_income += inc
+    total_annual_divs += inc * 12
 
-    vol = get_price_volatility(etf)
+    # ex-date window logic (approx weekly cycle)
+    zone = "HOLD"
+    if last_ex:
+        days = (pd.Timestamp.now() - last_ex).days
+        if days <= 2:
+            zone = "BUY"
+        elif days >= 5:
+            zone = "SELL"
 
-    rows.append([etf, shares, price, value, income, yield_pct, vol])
+    rows.append([etf, sh, price, val, inc, vol, zone])
 
-portfolio_df = pd.DataFrame(rows, columns=[
-    "ETF", "Shares", "Price", "Value", "Monthly Income", "Yield %", "Volatility"
-])
-
-# =========================
-# SNAPSHOT
-# =========================
+df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income","Volatility","Cycle Zone"])
 
 st.markdown("## 📊 Portfolio Snapshot")
 
-c1, c2, c3, c4 = st.columns(4)
+c1,c2,c3 = st.columns(3)
 c1.metric("Portfolio Value", f"${total_value:,.0f}")
 c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-c3.metric("Annual Income", f"${total_monthly_income*12:,.0f}")
-c4.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
+c3.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
 
-disp = portfolio_df.copy()
+disp = df.copy()
 disp["Price"] = disp["Price"].map("${:,.2f}".format)
 disp["Value"] = disp["Value"].map("${:,.0f}".format)
 disp["Monthly Income"] = disp["Monthly Income"].map("${:,.0f}".format)
-disp["Yield %"] = disp["Yield %"].map("{:.1%}".format)
-disp["Volatility"] = disp["Volatility"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
+disp["Volatility"] = disp["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
 
 st.dataframe(disp, use_container_width=True)
 
-# =========================
-# 🧾 TRUE RETURN TRACKING
-# =========================
+# ==================================================
+# WEEKLY ACTION PLAN
+# ==================================================
+
+st.markdown("## 📆 Weekly Action Plan")
+
+buys, trims, holds = [], [], []
+
+for _, r in df.iterrows():
+    if r["Cycle Zone"] == "BUY":
+        buys.append(r["ETF"])
+    elif r["Cycle Zone"] == "SELL":
+        if market_mode in ["STRESS"]:
+            trims.append(r["ETF"])
+        elif market_mode == "NORMAL":
+            holds.append(r["ETF"])
+        else:
+            holds.append(r["ETF"])
+    else:
+        holds.append(r["ETF"])
+
+if buys:
+    st.success("🔥 BUY (post-ex): " + ", ".join(buys))
+if trims:
+    st.error("🔻 TRIM / ROTATE: " + ", ".join(trims))
+if holds:
+    st.info("⚪ HOLD: " + ", ".join(holds))
+
+# ==================================================
+# FASTEST PATH OPTIMIZER
+# ==================================================
+
+st.markdown("## 🧩 Fastest Path to $1k Optimizer")
+
+df["Yield"] = (df["Monthly Income"]*12) / df["Value"]
+df["Score"] = (df["Yield"]/df["Yield"].max())*0.7 + (1-(df["Volatility"]/df["Volatility"].max()))*0.3
+df["Opt %"] = df["Score"] / df["Score"].sum() * 100
+
+opt = df[["ETF","Yield","Volatility","Opt %"]].copy()
+opt["Yield"] = opt["Yield"].map("{:.1%}".format)
+opt["Volatility"] = opt["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
+opt["Opt %"] = opt["Opt %"].map("{:.1f}%".format)
+
+st.dataframe(opt, use_container_width=True)
+
+# ==================================================
+# AFTER $1K SIMULATOR
+# ==================================================
+
+st.markdown("## 🔁 After $1k Strategy Simulator")
+
+mode = st.selectbox("After reaching $1k/mo:", ["Reinvest 100%", "Reinvest 70%", "Withdraw $400/mo"])
+
+avg_yield = total_monthly_income * 12 / total_value if total_value > 0 else 0
+
+proj_income = total_monthly_income
+proj_value = total_value
+
+months = 0
+while months < 180:
+    if proj_income < TARGET_MONTHLY_INCOME:
+        reinv = proj_income
+    else:
+        if mode == "Reinvest 100%":
+            reinv = proj_income
+        elif mode == "Reinvest 70%":
+            reinv = proj_income * 0.7
+        else:
+            reinv = max(0, proj_income - 400)
+
+    proj_value += monthly_contribution + reinv
+    proj_income = proj_value * avg_yield / 12
+    months += 1
+
+st.metric("Projected Income After 15y", f"${proj_income:,.0f}/mo")
+st.metric("Projected Portfolio After 15y", f"${proj_value:,.0f}")
+
+# ==================================================
+# TRUE RETURNS
+# ==================================================
 
 st.markdown("## 🧾 True Return Tracking")
 
-total_gain = total_value + total_est_annual_divs - total_contributions
-roi_pct = total_gain / total_contributions if total_contributions > 0 else 0
+gain = total_value + total_annual_divs - total_contributions
+roi = gain / total_contributions if total_contributions > 0 else 0
 
-c1, c2, c3 = st.columns(3)
+c1,c2,c3 = st.columns(3)
 c1.metric("Total Contributions", f"${total_contributions:,.0f}")
-c2.metric("Est. Annual Dividends", f"${total_est_annual_divs:,.0f}")
-c3.metric("True ROI (value + income)", f"{roi_pct*100:.1f}%")
+c2.metric("Next 12mo Income", f"${total_annual_divs:,.0f}")
+c3.metric("True ROI", f"{roi*100:.1f}%")
 
-st.caption("ROI = (portfolio value + next 12 months income – contributions) ÷ contributions")
+# ==================================================
+# EXPORT
+# ==================================================
 
-# =========================
-# 🎯 INCOME TARGET FORECAST
-# =========================
+st.markdown("## 📤 Save Snapshot")
 
-st.markdown("## 🎯 Time to $1,000 / Month Forecast")
+export = df.copy()
+export["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+export["Total Contributions"] = total_contributions
 
-if total_monthly_income > 0 and total_value > 0:
-    avg_yield = total_monthly_income * 12 / total_value
+csv = export.to_csv(index=False).encode("utf-8")
 
-    months = 0
-    proj_value = total_value
-    proj_income = total_monthly_income
+st.download_button("⬇ Download CSV", csv, f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "text/csv")
 
-    while proj_income < TARGET_MONTHLY_INCOME and months < 600:
-        proj_value += monthly_contribution
-        proj_value += proj_income
-        proj_income = proj_value * avg_yield / 12
-        months += 1
-
-    st.metric("Months to $1,000/mo", f"{months}")
-    st.metric("Years to $1,000/mo", f"{months/12:.1f}")
-    st.metric("Assumed Yield", f"{avg_yield*100:.1f}%")
-else:
-    st.warning("Income data unavailable for forecast.")
-
-# =========================
-# 🧩 AUTO-ALLOCATION OPTIMIZER
-# =========================
-
-st.markdown("## 🧩 Auto-Allocation Optimizer")
-
-opt_df = portfolio_df.copy()
-
-# Score = high yield + low volatility
-opt_df["Score"] = (
-    (opt_df["Yield %"] / opt_df["Yield %"].max()) * 0.6 +
-    (1 - (opt_df["Volatility"] / opt_df["Volatility"].max())) * 0.4
-)
-
-opt_df["Opt %"] = opt_df["Score"] / opt_df["Score"].sum() * 100
-
-opt_view = opt_df[["ETF", "Yield %", "Volatility", "Opt %"]].copy()
-opt_view["Yield %"] = opt_view["Yield %"].map("{:.1%}".format)
-opt_view["Volatility"] = opt_view["Volatility"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "—")
-opt_view["Opt %"] = opt_view["Opt %"].map("{:.1f}%".format)
-
-st.write("Suggested allocation based on **income + stability balance**:")
-st.dataframe(opt_view, use_container_width=True)
-
-st.caption("Optimizer favors higher income and lower volatility ETFs.")
-
-# =========================
-# CSV EXPORT
-# =========================
-
-st.markdown("## 📤 Save Weekly Snapshot")
-
-export_df = portfolio_df.copy()
-export_df["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-export_df["Total Contributions"] = total_contributions
-
-csv = export_df.to_csv(index=False).encode("utf-8")
-
-st.download_button(
-    label="⬇ Download Weekly Snapshot CSV",
-    data=csv,
-    file_name=f"income_snapshot_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-    mime="text/csv"
-)
-
-st.caption("Save these weekly to track income growth and true ROI over time.")
+st.caption("Save weekly snapshots to track income and strategy performance.")
