@@ -54,16 +54,21 @@ monthly_contribution = st.number_input(
 # HELPERS
 # =========================
 
-@st.cache_data(ttl=300)
-def get_intraday_change(ticker):
+@st.cache_data(ttl=600)
+def get_last_120min_change(ticker):
+    """
+    Uses LAST AVAILABLE 120 one-minute candles (not only live market).
+    Works after hours and before open.
+    """
     try:
-        data = yf.download(ticker, period="1d", interval="1m", progress=False)
+        data = yf.download(ticker, period="2d", interval="1m", progress=False)
         if data is None or len(data) < WINDOW:
             return None, None
 
         recent = data.tail(WINDOW)
         start_price = float(recent["Close"].iloc[0])
         end_price = float(recent["Close"].iloc[-1])
+
         pct = (end_price - start_price) / start_price
         vol = recent["Close"].pct_change().std()
 
@@ -115,14 +120,14 @@ def get_last_close_price(ticker):
         return None
 
 # =========================
-# MARKET MODE (OPTIONAL)
+# MARKET MODE (LAST 120 MIN)
 # =========================
 
-bench_chg, _ = get_intraday_change(BENCH)
+bench_chg, _ = get_last_120min_change(BENCH)
 
 if bench_chg is None:
     market_mode = "UNKNOWN"
-    st.info("Intraday market data unavailable — momentum signals paused.")
+    st.info("Recent intraday data unavailable — momentum signals paused.")
     bench_chg = 0.0
 else:
     if bench_chg > 0.003:
@@ -141,7 +146,7 @@ elif market_mode == "NEUTRAL":
 else:
     st.info("⚪ MARKET MODE: UNAVAILABLE")
 
-st.metric("QQQ (intraday)", f"{bench_chg*100:.2f}%")
+st.metric("QQQ (last available 120 min)", f"{bench_chg*100:.2f}%")
 
 # =========================
 # PORTFOLIO SNAPSHOT
@@ -191,8 +196,8 @@ st.dataframe(portfolio_df, use_container_width=True)
 
 st.markdown("## 🎯 Income Target Forecast")
 
-if total_monthly_income > 0:
-    avg_yield = total_monthly_income * 12 / total_value if total_value > 0 else 0
+if total_monthly_income > 0 and total_value > 0:
+    avg_yield = total_monthly_income * 12 / total_value
 
     months = 0
     proj_value = total_value
@@ -200,7 +205,7 @@ if total_monthly_income > 0:
 
     while proj_income < TARGET_MONTHLY_INCOME and months < 600:
         proj_value += monthly_contribution
-        proj_value += proj_income  # reinvest dividends monthly
+        proj_value += proj_income
         proj_income = proj_value * avg_yield / 12
         months += 1
 
@@ -209,26 +214,25 @@ if total_monthly_income > 0:
     st.metric("Estimated months to $1,000/mo", f"{months}")
     st.metric("Estimated years to $1,000/mo", f"{years:.1f}")
     st.metric("Assumed portfolio yield", f"{avg_yield*100:.1f}%")
-
 else:
     st.warning("Income data unavailable for forecast.")
 
 # =========================
-# MOMENTUM ENGINE (OPTIONAL)
+# MOMENTUM ENGINE (LAST 120 MIN)
 # =========================
 
-st.markdown("## ⚡ Intraday Momentum Ranking")
+st.markdown("## ⚡ Momentum Ranking (Last Available 120 Minutes)")
 
 mom_rows = []
 
 for etf in ETF_LIST:
-    chg, vol = get_intraday_change(etf)
+    chg, vol = get_last_120min_change(etf)
     if chg is None:
         continue
     mom_rows.append([etf, chg, vol])
 
 if len(mom_rows) == 0:
-    st.info("No intraday candle data available right now. Momentum will update during US market hours.")
+    st.info("No recent intraday data available yet.")
     mom_df = pd.DataFrame(columns=["ETF", "Momentum", "Volatility", "Signal"])
 else:
     mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
@@ -248,7 +252,6 @@ else:
         signals.append(sig)
 
     mom_df["Signal"] = signals
-
     mom_df["Momentum"] = mom_df["Momentum"].apply(lambda x: f"{x:.2%}")
     mom_df["Volatility"] = mom_df["Volatility"].apply(lambda x: f"{x:.4f}")
 
@@ -277,6 +280,6 @@ elif market_mode in ["AGGRESSIVE", "NEUTRAL"]:
     else:
         st.info("No strong momentum edge. Hold and collect income.")
 else:
-    st.info("Rotation signals unavailable until intraday data resumes.")
+    st.info("Rotation signals unavailable.")
 
-st.caption("Income uses last 4 months of REAL distributions. Forecast assumes constant yield and full reinvestment.")
+st.caption("Momentum uses the LAST AVAILABLE 120 one-minute candles, not only live data.")
