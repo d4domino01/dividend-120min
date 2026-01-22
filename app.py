@@ -2,13 +2,13 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # =========================
 # PAGE
 # =========================
 
-st.set_page_config(page_title="Income ETF Rotation Engine", layout="centered")
+st.set_page_config(page_title="Income Rotation Engine", layout="centered")
 st.title("🔥 Income ETF Power-Hour Decision Engine")
 st.caption("Momentum + REAL income-based dividend tracking")
 
@@ -30,9 +30,16 @@ st.markdown("## 📥 Your Actual Holdings")
 holdings = {}
 cols = st.columns(len(ETF_LIST))
 
+default_vals = {"CHPY":55,"QDTE":110,"XDTE":69,"JEPQ":19,"AIPI":14}
+
 for i, etf in enumerate(ETF_LIST):
     with cols[i]:
-        holdings[etf] = st.number_input(f"{etf} Shares", min_value=0, value=0, step=1)
+        holdings[etf] = st.number_input(
+            f"{etf} Shares",
+            min_value=0,
+            value=int(default_vals.get(etf, 0)),
+            step=1
+        )
 
 # =========================
 # HELPERS
@@ -58,11 +65,17 @@ def get_recent_dividends(ticker, months=4):
     stock = yf.Ticker(ticker)
     divs = stock.dividends
 
-    if divs.empty:
-        return 0, 0
+    if divs is None or divs.empty:
+        return 0.0, 0.0
 
-    cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
+    # FIX: force datetime index
+    divs.index = pd.to_datetime(divs.index)
+
+    cutoff = pd.Timestamp.now(tz=None) - pd.DateOffset(months=months)
     recent = divs[divs.index >= cutoff]
+
+    if len(recent) == 0:
+        return 0.0, 0.0
 
     total = recent.sum()
     monthly_avg = total / months
@@ -73,7 +86,7 @@ def get_recent_dividends(ticker, months=4):
 @st.cache_data(ttl=300)
 def get_price(ticker):
     data = yf.download(ticker, period="1d", interval="1m", progress=False)
-    if len(data) == 0:
+    if data is None or len(data) == 0:
         return None
     return float(data["Close"].iloc[-1])
 
@@ -81,11 +94,13 @@ def get_price(ticker):
 # MARKET MODE
 # =========================
 
-bench_chg, _ = get_intraday_change(BENCH)
+bench = get_intraday_change(BENCH)
 
-if bench_chg is None:
+if bench[0] is None:
     st.warning("Market data not available yet. Try later in session.")
     st.stop()
+
+bench_chg = bench[0]
 
 if bench_chg > 0.003:
     market_mode = "AGGRESSIVE"
@@ -125,9 +140,7 @@ for etf in ETF_LIST:
     total_value += value
     total_monthly_income += income
 
-    rows.append([
-        etf, shares, price, value, income
-    ])
+    rows.append([etf, shares, price, value, income])
 
 portfolio_df = pd.DataFrame(rows, columns=[
     "ETF", "Shares", "Price", "Value", "Monthly Income"
@@ -135,10 +148,10 @@ portfolio_df = pd.DataFrame(rows, columns=[
 
 st.markdown("## 📊 Portfolio Snapshot")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Portfolio Value", f"${total_value:,.0f}")
-col2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-col3.metric("Progress to $1k/mo", f"{total_monthly_income/1000*100:.1f}%")
+c1, c2, c3 = st.columns(3)
+c1.metric("Portfolio Value", f"${total_value:,.0f}")
+c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
+c3.metric("Progress to $1k/mo", f"{total_monthly_income/1000*100:.1f}%")
 
 portfolio_df["Price"] = portfolio_df["Price"].map("${:,.2f}".format)
 portfolio_df["Value"] = portfolio_df["Value"].map("${:,.0f}".format)
@@ -177,14 +190,13 @@ for i, row in mom_df.iterrows():
     signals.append(sig)
 
 mom_df["Signal"] = signals
-
 mom_df["Momentum"] = mom_df["Momentum"].map("{:.2%}".format)
 mom_df["Volatility"] = mom_df["Volatility"].map("{:.4f}".format)
 
 st.dataframe(mom_df, use_container_width=True)
 
 # =========================
-# ROTATION SUGGESTION
+# ROTATION GUIDANCE
 # =========================
 
 st.markdown("## 🔄 Weekly Rotation Guidance")
