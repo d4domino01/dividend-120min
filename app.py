@@ -74,7 +74,6 @@ def get_recent_dividends(ticker, months=4):
         if divs is None or divs.empty:
             return 0.0, 0.0
 
-        # force datetime index + remove timezone
         divs.index = pd.to_datetime(divs.index, errors="coerce").tz_localize(None)
 
         cutoff = pd.Timestamp.now().tz_localize(None) - pd.DateOffset(months=months)
@@ -84,8 +83,6 @@ def get_recent_dividends(ticker, months=4):
             return 0.0, 0.0
 
         total = recent.sum()
-
-        # normalize by real days (better for weekly ETFs)
         days = max((divs.index.max() - cutoff).days, 1)
         monthly_avg = total / days * 30
 
@@ -94,10 +91,10 @@ def get_recent_dividends(ticker, months=4):
         return 0.0, 0.0
 
 
-@st.cache_data(ttl=300)
-def get_price(ticker):
+@st.cache_data(ttl=600)
+def get_last_close_price(ticker):
     try:
-        data = yf.download(ticker, period="1d", interval="1m", progress=False)
+        data = yf.download(ticker, period="5d", interval="1d", progress=False)
         if data is None or len(data) == 0:
             return None
         price = float(data["Close"].iloc[-1])
@@ -108,33 +105,36 @@ def get_price(ticker):
         return None
 
 # =========================
-# MARKET MODE
+# MARKET MODE (OPTIONAL)
 # =========================
 
 bench_chg, _ = get_intraday_change(BENCH)
 
 if bench_chg is None:
-    st.warning("Market data not available yet. Try later in session.")
-    st.stop()
-
-if bench_chg > 0.003:
-    market_mode = "AGGRESSIVE"
-elif bench_chg < -0.003:
-    market_mode = "DEFENSIVE"
+    market_mode = "UNKNOWN"
+    st.info("Intraday market data unavailable — momentum signals paused.")
+    bench_chg = 0.0
 else:
-    market_mode = "NEUTRAL"
+    if bench_chg > 0.003:
+        market_mode = "AGGRESSIVE"
+    elif bench_chg < -0.003:
+        market_mode = "DEFENSIVE"
+    else:
+        market_mode = "NEUTRAL"
 
 if market_mode == "AGGRESSIVE":
     st.success("🟢 MARKET MODE: AGGRESSIVE (risk-on)")
 elif market_mode == "DEFENSIVE":
     st.error("🔴 MARKET MODE: DEFENSIVE (risk-off)")
-else:
+elif market_mode == "NEUTRAL":
     st.warning("🟡 MARKET MODE: NEUTRAL")
+else:
+    st.info("⚪ MARKET MODE: UNAVAILABLE")
 
-st.metric("QQQ (last 2h)", f"{bench_chg*100:.2f}%")
+st.metric("QQQ (intraday)", f"{bench_chg*100:.2f}%")
 
 # =========================
-# PORTFOLIO SNAPSHOT
+# PORTFOLIO SNAPSHOT (ALWAYS WORKS)
 # =========================
 
 rows = []
@@ -143,7 +143,7 @@ total_monthly_income = 0
 
 for etf in ETF_LIST:
     shares = holdings.get(etf, 0)
-    price = get_price(etf)
+    price = get_last_close_price(etf)
 
     if price is None:
         continue
@@ -158,7 +158,7 @@ for etf in ETF_LIST:
     rows.append([etf, shares, price, value, income])
 
 portfolio_df = pd.DataFrame(rows, columns=[
-    "ETF", "Shares", "Price", "Value", "Monthly Income"
+    "ETF", "Shares", "Price (Last Close)", "Value", "Monthly Income"
 ])
 
 st.markdown("## 📊 Portfolio Snapshot")
@@ -169,17 +169,17 @@ c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
 c3.metric("Progress to $1k/mo", f"{total_monthly_income/1000*100:.1f}%")
 
 if not portfolio_df.empty:
-    portfolio_df["Price"] = portfolio_df["Price"].map("${:,.2f}".format)
+    portfolio_df["Price (Last Close)"] = portfolio_df["Price (Last Close)"].map("${:,.2f}".format)
     portfolio_df["Value"] = portfolio_df["Value"].map("${:,.0f}".format)
     portfolio_df["Monthly Income"] = portfolio_df["Monthly Income"].map("${:,.0f}".format)
 
 st.dataframe(portfolio_df, use_container_width=True)
 
 # =========================
-# MOMENTUM ENGINE
+# MOMENTUM ENGINE (OPTIONAL)
 # =========================
 
-st.markdown("## ⚡ End-of-Day Momentum Ranking")
+st.markdown("## ⚡ Intraday Momentum Ranking")
 
 mom_rows = []
 
@@ -189,9 +189,11 @@ for etf in ETF_LIST:
         continue
     mom_rows.append([etf, chg, vol])
 
-mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
-
-if not mom_df.empty:
+if len(mom_rows) == 0:
+    st.info("No intraday candle data available right now. Momentum will update during US market hours.")
+    mom_df = pd.DataFrame(columns=["ETF", "Momentum", "Volatility", "Signal"])
+else:
+    mom_df = pd.DataFrame(mom_rows, columns=["ETF", "Momentum", "Volatility"])
     mom_df = mom_df.sort_values("Momentum", ascending=False).reset_index(drop=True)
 
     signals = []
@@ -209,13 +211,8 @@ if not mom_df.empty:
 
     mom_df["Signal"] = signals
 
-    mom_df["Momentum"] = mom_df["Momentum"].apply(
-        lambda x: f"{x:.2%}" if pd.notna(x) else "—"
-    )
-
-    mom_df["Volatility"] = mom_df["Volatility"].apply(
-        lambda x: f"{x:.4f}" if pd.notna(x) else "—"
-    )
+    mom_df["Momentum"] = mom_df["Momentum"].apply(lambda x: f"{x:.2%}")
+    mom_df["Volatility"] = mom_df["Volatility"].apply(lambda x: f"{x:.4f}")
 
 st.dataframe(mom_df, use_container_width=True)
 
@@ -235,11 +232,13 @@ if market_mode == "DEFENSIVE":
     st.error("Risk-off environment — protect capital and income.")
     if reduces:
         st.write("🔻 Consider trimming:", ", ".join(reduces))
-else:
+elif market_mode in ["AGGRESSIVE", "NEUTRAL"]:
     if buys:
         st.success("🔥 Best reinvestment targets this week:")
         st.write(", ".join(buys))
     else:
         st.info("No strong momentum edge. Hold and collect income.")
+else:
+    st.info("Rotation signals unavailable until intraday data resumes.")
 
-st.caption("Income based on REAL distributions from last 4 months. Momentum based on last 120 minutes.")
+st.caption("Income uses last 4 months of REAL distributions. Momentum uses last ~120 minutes when available.")
