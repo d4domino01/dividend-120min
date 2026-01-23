@@ -19,9 +19,9 @@ st.caption("Focused on QDTE • CHPY • XDTE until $1k/month, then expand")
 
 if "etfs" not in st.session_state:
     st.session_state.etfs = [
-        {"ETF": "QDTE", "Shares": 126, "Type": "Income"},
-        {"ETF": "CHPY", "Shares": 62,  "Type": "Income"},
-        {"ETF": "XDTE", "Shares": 83,  "Type": "Income"},
+        {"ETF": "QDTE", "Shares": 125, "Type": "Income"},
+        {"ETF": "CHPY", "Shares": 63,  "Type": "Income"},
+        {"ETF": "XDTE", "Shares": 84,  "Type": "Income"},
     ]
 
 # ==================================================
