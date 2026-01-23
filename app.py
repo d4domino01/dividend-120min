@@ -8,8 +8,8 @@ from datetime import datetime
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.2.4", layout="centered")
-st.title("🔥 Income Strategy Engine v3.2.4")
+st.set_page_config(page_title="Income Engine v3.2.5", layout="centered")
+st.title("🔥 Income Strategy Engine v3.2.5")
 st.caption("Yield-driven income • crash alerts • rotation guidance")
 
 # ==================================================
@@ -183,7 +183,7 @@ disp["Volatility"] = disp["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x
 st.dataframe(disp, use_container_width=True)
 
 # ==================================================
-# 🚨 RISK & ROTATION ALERTS (CRASH SAFE)
+# 🚨 RISK & ROTATION ALERTS (BULLETPROOF)
 # ==================================================
 
 st.markdown("## 🚨 Risk & Rotation Alerts")
@@ -193,22 +193,24 @@ risk_score = 0
 
 qqq_hist = get_price_history("QQQ")
 
+monthly_ret = None
 if qqq_hist is not None and len(qqq_hist) >= 25:
-    monthly_ret = qqq_hist["Close"].pct_change(21).iloc[-1]
+    try:
+        monthly_ret = float(qqq_hist["Close"].pct_change(21).iloc[-1])
+    except:
+        monthly_ret = None
 
-    if pd.notna(monthly_ret):
-        if monthly_ret < -0.12:
-            risk_score += 2
-            alerts.append(f"🔴 QQQ down {monthly_ret*100:.1f}% in last month")
-        elif monthly_ret < -0.08:
-            risk_score += 1
-            alerts.append(f"🟠 QQQ down {monthly_ret*100:.1f}% in last month")
-        else:
-            alerts.append("🟢 Market trend stable")
+if monthly_ret is not None and np.isfinite(monthly_ret):
+    if monthly_ret < -0.12:
+        risk_score += 2
+        alerts.append(f"🔴 QQQ down {monthly_ret*100:.1f}% in last month")
+    elif monthly_ret < -0.08:
+        risk_score += 1
+        alerts.append(f"🟠 QQQ down {monthly_ret*100:.1f}% in last month")
     else:
-        alerts.append("⚪ Market trend unclear")
+        alerts.append("🟢 Market trend stable")
 else:
-    alerts.append("⚪ Market data unavailable")
+    alerts.append("⚪ Market trend unavailable")
 
 if total_value > 0:
     hy_pct = high_yield_value / total_value
@@ -234,7 +236,7 @@ for etf in HIGH_YIELD_ETFS:
     ma20 = close.rolling(20).mean().iloc[-1]
     trend = close.pct_change(10).iloc[-1]
 
-    if pd.notna(ma20) and pd.notna(trend):
+    if np.isfinite(ma20) and np.isfinite(trend):
         if price < ma20 and trend < -0.05:
             risk_score += 1
             etf_warnings.append(f"🔴 {etf} strong downtrend")
