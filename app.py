@@ -4,8 +4,8 @@ import yfinance as yf
 from datetime import datetime
 
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
-st.title("🔥 Income Strategy Engine — Weekly Income Build Phase")
-st.caption("Weekly income ETFs → build to $1k/mo → rotate into growth")
+st.title("🔥 Income Strategy Engine v5.0")
+st.caption("Weekly income build • crash protection • smart reinvestment")
 
 # ==================================================
 # SESSION STATE
@@ -39,8 +39,8 @@ def safe_price(ticker):
 @st.cache_data(ttl=900)
 def safe_hist(ticker):
     try:
-        d = yf.download(ticker, period="2mo", interval="1d", progress=False)
-        if d is None or len(d) < 15:
+        d = yf.download(ticker, period="3mo", interval="1d", progress=False)
+        if d is None or len(d) < 30:
             return None
         return d
     except:
@@ -93,7 +93,6 @@ for e in st.session_state.etfs:
     })
 
 df = pd.DataFrame(rows)
-
 weekly_income = total_monthly_income / 4 if total_monthly_income else 0
 
 # ==================================================
@@ -118,84 +117,80 @@ else:
     market_mode = "NORMAL"
 
 # ==================================================
-# ⚠ ETF RISK & PAYOUT STABILITY
+# ⚠ ETF RISK + DIVIDEND CUT DETECTOR
 # ==================================================
 
 st.markdown("## ⚠ ETF Risk & Payout Stability")
 
-alerts = []
-trend_warnings = []
+risk_msgs = []
 
 for e in st.session_state.etfs:
     h = safe_hist(e["ETF"])
     if h is None:
         continue
 
-    last = h["Close"].iloc[-1]
-    high30 = h["Close"].rolling(30).max().iloc[-1]
-    ma30 = h["Close"].rolling(30).mean().iloc[-1]
+    close = h["Close"]
+    last = close.iloc[-1]
+    ma30 = close.rolling(30).mean().iloc[-1]
+    high30 = close.rolling(30).max().iloc[-1]
+    ret30 = close.pct_change(30).iloc[-1]
 
-    if not all(isinstance(x, (int, float)) for x in [last, high30, ma30]):
+    if not all(isinstance(x, (int, float)) for x in [last, ma30, high30, ret30]):
         continue
 
-    if high30 > 0:
-        drop30 = (last - high30) / high30
-        if drop30 <= -0.15:
-            alerts.append(f"🔴 {e['ETF']} down {abs(drop30)*100:.1f}% in 30 days")
+    drop30 = (last - high30) / high30 if high30 > 0 else 0
+    dip = (last - ma30) / ma30 if ma30 > 0 else 0
 
-    if ma30 > 0:
-        dip = (last - ma30) / ma30
-        if dip <= -0.08:
-            trend_warnings.append(f"📉 {e['ETF']} weakening — payout risk rising")
+    if drop30 < -0.15 and dip < -0.08 and ret30 < -0.05:
+        risk_msgs.append(f"🔴 {e['ETF']} payout risk rising — price trend breaking")
 
-if alerts:
-    for a in alerts:
-        st.warning(a)
+    elif drop30 < -0.10:
+        risk_msgs.append(f"🟡 {e['ETF']} weakening — monitor distributions")
 
-if trend_warnings:
-    for w in trend_warnings:
-        st.error(w)
-
-if not alerts and not trend_warnings:
+if risk_msgs:
+    for r in risk_msgs:
+        st.warning(r)
+else:
     st.success("No ETF payout risk detected.")
 
 # ==================================================
-# 📆 WEEKLY ACTION PLAN
+# 🧠 AUTO ALLOCATION OPTIMIZER
 # ==================================================
 
-st.markdown("## 📆 Weekly Action Plan")
+st.markdown("## 🧠 Auto Allocation Optimizer")
 
 scores = []
 
 for e in st.session_state.etfs:
     h = safe_hist(e["ETF"])
-    if h is None or len(h) < 31:
+    if h is None:
         continue
 
-    ret30 = h["Close"].pct_change(30).iloc[-1]
+    ret14 = h["Close"].pct_change(14).iloc[-1]
     vol = h["Close"].pct_change().std()
+    y = YIELD_EST.get(e["ETF"], 0.3)
 
-    if not isinstance(ret30, (int, float)) or not isinstance(vol, (int, float)):
+    if not all(isinstance(x, (int, float)) for x in [ret14, vol]):
         continue
 
-    scores.append((e["ETF"], ret30 - vol))
+    score = (ret14 * 0.5) + (y * 0.3) - (vol * 0.2)
+    scores.append((e["ETF"], score))
 
 if scores:
-    best = sorted(scores, key=lambda x: x[1], reverse=True)[0][0]
-    st.success(f"✅ Best ETF to reinvest into this week: **{best}**")
+    ranked = sorted(scores, key=lambda x: x[1], reverse=True)
 
-if market_mode == "CRASH":
-    st.error("Shift new money + some income into Growth ETFs.")
-elif market_mode == "DOWN":
-    st.warning("Reduce income adds, prepare rotation.")
-else:
-    st.success("Reinvest weekly income into strongest income ETF.")
+    st.write("### 🔝 Best reinvestment order this week:")
+    for i, s in enumerate(ranked, 1):
+        st.write(f"{i}. **{s[0]}**")
+
+    best = ranked[0][0]
+    st.success(f"👉 Allocate new money into **{best}** this week")
 
 # ==================================================
-# 🧮 AUTO WEEKLY BUY CALCULATOR
+# 📆 WEEKLY BUY CALCULATOR
 # ==================================================
 
-st.markdown("## 🧮 Auto Weekly Buy Calculator")
+st.markdown("## 🧮 Weekly Buy Calculator")
 
 st.session_state.weekly_cash = st.number_input(
     "Weekly new cash added ($)",
@@ -204,37 +199,26 @@ st.session_state.weekly_cash = st.number_input(
     value=st.session_state.weekly_cash
 )
 
-total_weekly_budget = st.session_state.weekly_cash + weekly_income
-
-st.write(f"**Total to invest this week:** ${total_weekly_budget:,.0f}")
+budget = st.session_state.weekly_cash + weekly_income
+st.write(f"**Total available this week:** ${budget:,.0f}")
 
 if scores:
-    target = best
-    price = safe_price(target)
+    price = safe_price(best)
     if isinstance(price, (int, float)) and price > 0:
-        shares = int(total_weekly_budget // price)
-        st.success(f"👉 Buy **{shares} shares of {target}** this week")
-    else:
-        st.info("Price unavailable — cannot calculate shares.")
+        shares = int(budget // price)
+        st.success(f"Buy **{shares} shares of {best}** this week")
 
 # ==================================================
-# 🔁 ROTATION CALCULATOR (CRASH MODE)
+# 🔁 CRASH ROTATION CALCULATOR
 # ==================================================
 
-st.markdown("## 🔁 Crash Rotation Calculator")
+st.markdown("## 🔁 Crash Rotation Planner")
 
 if market_mode == "CRASH":
-
     income_value = df[df["Type"]=="Income"]["Value"].sum()
-    rotate_pct = st.slider("Rotate % of income holdings to growth", 10, 60, 30)
-
-    move_amt = income_value * rotate_pct / 100
-
-    st.error(f"Move approximately **${move_amt:,.0f}** from Income → Growth ETFs")
-
-    growth_list = df[df["Type"]=="Growth"]["ETF"].tolist()
-    if not growth_list:
-        st.info("No Growth ETFs yet — add them in Manage ETFs section.")
+    pct = st.slider("Rotate % of income holdings", 10, 60, 30)
+    move = income_value * pct / 100
+    st.error(f"Move about **${move:,.0f}** from Income → Growth ETFs")
 
 # ==================================================
 # 🔮 FORECAST
@@ -244,12 +228,12 @@ st.markdown("## 🔮 Income Forecast")
 
 if total_value > 0 and total_monthly_income > 0:
     avg_yield = total_monthly_income * 12 / total_value
-    inc_4w = (total_value + total_monthly_income) * avg_yield / 12
-    inc_12w = (total_value + total_monthly_income * 3) * avg_yield / 12
+    inc4 = (total_value + total_monthly_income) * avg_yield / 12
+    inc12 = (total_value + total_monthly_income * 3) * avg_yield / 12
 
     c1, c2 = st.columns(2)
-    c1.metric("Income in 4 weeks", f"${inc_4w:,.0f}/mo")
-    c2.metric("Income in 12 weeks", f"${inc_12w:,.0f}/mo")
+    c1.metric("Income in 4 weeks", f"${inc4:,.0f}/mo")
+    c2.metric("Income in 12 weeks", f"${inc12:,.0f}/mo")
 
 # ==================================================
 # ➕ MANAGE ETFs
@@ -267,7 +251,6 @@ with st.expander("➕ Manage ETFs", expanded=False):
 
     for i, e in enumerate(list(st.session_state.etfs)):
         c1, c2, c3, c4 = st.columns([3,3,3,1])
-
         c1.write(e["ETF"])
 
         st.session_state.etfs[i]["Shares"] = c2.number_input(
@@ -311,7 +294,6 @@ with st.expander("📤 Save Snapshot", expanded=False):
     if not df.empty:
         export = df.copy()
         export["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
         csv = export.to_csv(index=False).encode("utf-8")
 
         st.download_button(
@@ -321,4 +303,4 @@ with st.expander("📤 Save Snapshot", expanded=False):
             "text/csv"
         )
 
-st.caption("Income build → crash protection → growth rotation.")
+st.caption("Income build → risk control → smart rotation.")
