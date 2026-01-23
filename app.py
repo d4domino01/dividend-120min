@@ -27,26 +27,32 @@ if "etfs" not in st.session_state:
 # HELPERS
 # ==================================================
 
+@st.cache_data(ttl=900)
 def get_price(ticker):
     try:
         data = yf.download(ticker, period="5d", interval="1d", progress=False)
+        if len(data) == 0:
+            return None
         return float(data["Close"].iloc[-1])
     except:
         return None
 
+@st.cache_data(ttl=900)
 def get_market_drop():
     try:
         data = yf.download("^GSPC", period="1mo", interval="1d", progress=False)
         if len(data) < 5:
             return None
-        high = data["Close"].max()
-        last = data["Close"].iloc[-1]
+        high = float(data["Close"].max())
+        last = float(data["Close"].iloc[-1])
+        if high == 0:
+            return None
         return (last - high) / high
     except:
         return None
 
 # ==================================================
-# BUILD PORTFOLIO TABLE
+# BUILD PORTFOLIO
 # ==================================================
 
 rows = []
@@ -56,7 +62,10 @@ total_income = 0
 for e in st.session_state.etfs:
     price = get_price(e["ETF"])
     value = (price or 0) * e["Shares"]
-    monthly_income = value * 0.01 if e["Type"]=="Income" else 0  # placeholder yield
+
+    # placeholder yield model (safe)
+    monthly_income = value * 0.01 if e["Type"]=="Income" else 0
+
     total_value += value
     total_income += monthly_income
 
@@ -72,15 +81,15 @@ for e in st.session_state.etfs:
 df = pd.DataFrame(rows)
 
 # ==================================================
-# 🔴 TOP WARNING / ROTATION ENGINE
+# 🚨 TOP WARNING / ROTATION STATUS (ALWAYS SAFE)
 # ==================================================
+
+st.markdown("## 🚨 Market & Rotation Status")
 
 drop = get_market_drop()
 rotation_msgs = []
 
-st.markdown("## 🚨 Market & Rotation Status")
-
-if drop is None or (isinstance(drop,float) and np.isnan(drop)):
+if drop is None or not np.isfinite(drop):
     st.info("⚪ Market data unavailable — crash detection paused.")
 
 else:
@@ -100,7 +109,9 @@ else:
     if mode in ["CRASH","DOWN"] and not income.empty and not growth.empty:
         weakest = income.sort_values("Monthly Income").head(2)["ETF"].tolist()
         best_growth = growth.sort_values("Value").head(2)["ETF"].tolist()
-        rotation_msgs.append(f"Move funds from: {', '.join(weakest)} ➜ into: {', '.join(best_growth)}")
+        rotation_msgs.append(
+            f"Move funds from: {', '.join(weakest)} ➜ into: {', '.join(best_growth)}"
+        )
 
     elif mode=="NORMAL" and not income.empty:
         best = income.sort_values("Monthly Income", ascending=False).head(2)["ETF"].tolist()
@@ -115,7 +126,7 @@ else:
 st.divider()
 
 # ==================================================
-# CONTROLS
+# USER INPUTS
 # ==================================================
 
 monthly_add = st.number_input("Monthly cash added ($)", value=200, step=50)
@@ -132,23 +143,33 @@ with st.expander("➕ Manage ETFs", expanded=False):
 
     if st.button("Add ETF"):
         if new_ticker:
-            st.session_state.etfs.append({"ETF":new_ticker.upper(),"Shares":0,"Type":new_type})
+            st.session_state.etfs.append({
+                "ETF":new_ticker.upper(),
+                "Shares":0,
+                "Type":new_type
+            })
             st.rerun()
 
     st.markdown("### Current ETFs")
 
-    for i,e in enumerate(st.session_state.etfs):
+    for i,e in enumerate(list(st.session_state.etfs)):
         c1,c2,c3,c4 = st.columns([3,3,3,1])
+
         with c1:
             st.write(e["ETF"])
+
         with c2:
             st.session_state.etfs[i]["Shares"] = st.number_input(
-                "Shares", value=e["Shares"], key=f"s{i}"
+                "Shares", value=e["Shares"], min_value=0, step=1, key=f"s{i}"
             )
+
         with c3:
             st.session_state.etfs[i]["Type"] = st.selectbox(
-                "Type", ["Income","Growth"], index=0 if e["Type"]=="Income" else 1, key=f"t{i}"
+                "Type", ["Income","Growth"],
+                index=0 if e["Type"]=="Income" else 1,
+                key=f"t{i}"
             )
+
         with c4:
             if st.button("❌", key=f"d{i}"):
                 st.session_state.etfs.pop(i)
@@ -162,22 +183,35 @@ with st.expander("📊 Portfolio Snapshot", expanded=True):
 
     st.metric("Portfolio Value", f"${total_value:,.0f}")
     st.metric("Monthly Income", f"${total_income:,.0f}")
-    progress = min(total_income/1000,1)
+
+    progress = min(total_income/1000,1) if total_income else 0
     st.progress(progress)
     st.write(f"Progress to $1k/mo: {progress*100:.1f}%")
 
     st.dataframe(df, use_container_width=True)
 
 # ==================================================
-# AFTER $1K ENGINE (PLACEHOLDER)
+# WEEKLY ACTION PLAN (SAFE)
+# ==================================================
+
+with st.expander("📆 Weekly Action Plan", expanded=True):
+
+    if rotation_msgs:
+        for m in rotation_msgs:
+            st.write("•", m)
+    else:
+        st.write("• Continue normal reinvestment into income ETFs.")
+
+# ==================================================
+# AFTER $1K STRATEGY
 # ==================================================
 
 with st.expander("🔁 After $1k Strategy Simulator"):
-    st.info("When income reaches $1k/mo, this engine will simulate 50% withdraw / 50% reinvest.")
+    st.info("Planned: 50% withdraw, 50% reinvest with growth tilt.")
 
 # ==================================================
-# TRUE RETURN TRACKING (PLACEHOLDER)
+# TRUE RETURN TRACKING
 # ==================================================
 
 with st.expander("📈 True Return Tracking"):
-    st.info("Snapshot-based real performance tracking coming next.")
+    st.info("Snapshot-based return tracking coming next.")
