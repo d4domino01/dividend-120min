@@ -11,21 +11,21 @@ from datetime import datetime
 
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 st.title("🔥 Income Strategy Engine — Weekly Income Build Phase")
-st.caption("Focused on QDTE • CHPY • XDTE until $1k/month, then expand")
+st.caption("QDTE • CHPY • XDTE → build to $1k/mo, then rotate into growth")
 
 # ==================================================
-# SESSION STATE (START WITH 3 WEEKLY ETFs)
+# SESSION STATE — START WITH 3 WEEKLY ETFs
 # ==================================================
 
 if "etfs" not in st.session_state:
     st.session_state.etfs = [
-        {"ETF": "QDTE", "Shares": 125, "Type": "Income"},
-        {"ETF": "CHPY", "Shares": 63,  "Type": "Income"},
-        {"ETF": "XDTE", "Shares": 84,  "Type": "Income"},
+        {"ETF": "QDTE", "Shares": 126, "Type": "Income"},
+        {"ETF": "CHPY", "Shares": 62,  "Type": "Income"},
+        {"ETF": "XDTE", "Shares": 83,  "Type": "Income"},
     ]
 
 # ==================================================
-# SAVE / LOAD PORTFOLIO (PERSIST SETTINGS)
+# SAVE / LOAD PORTFOLIO
 # ==================================================
 
 def export_portfolio():
@@ -81,6 +81,24 @@ def get_market_drop():
     except:
         return None
 
+@st.cache_data(ttl=900)
+def get_etf_risk(ticker):
+    try:
+        d = yf.download(ticker, period="2mo", interval="1d", progress=False)
+        if d is None or len(d) < 10:
+            return None, None
+
+        last = d["Close"].iloc[-1]
+        high_30 = d["Close"].rolling(30).max().iloc[-1]
+        high_7 = d["Close"].rolling(7).max().iloc[-1]
+
+        drop_30 = (last - high_30) / high_30 if high_30 else None
+        drop_7 = (last - high_7) / high_7 if high_7 else None
+
+        return drop_7, drop_30
+    except:
+        return None, None
+
 # ==================================================
 # BUILD PORTFOLIO
 # ==================================================
@@ -89,7 +107,6 @@ rows = []
 total_value = 0
 total_monthly_income = 0
 
-# conservative yield estimates (editable later)
 YIELD_EST = {
     "QDTE": 0.42,
     "CHPY": 0.41,
@@ -120,45 +137,83 @@ for e in st.session_state.etfs:
 df = pd.DataFrame(rows)
 
 # ==================================================
-# 🔝 TOP WARNING + ROTATION STATUS
+# 🔝 TOP STATUS + TIME TO $1K
 # ==================================================
 
-st.markdown("## 🚨 Market & Rotation Status")
+st.markdown("## 🚨 Market & Income Status")
 
 drop = get_market_drop()
-rotation_msgs = []
+
+if total_monthly_income > 0 and total_value > 0:
+    est_gain = (total_monthly_income + 200) * (total_monthly_income / total_value)
+    months_to_1k = max(int((1000 - total_monthly_income) / max(est_gain, 1)), 1)
+    st.info(f"⏱️ Estimated time to reach $1,000/month: **~{months_to_1k} months**")
 
 if drop is None or not np.isfinite(drop):
     st.info("⚪ Market data unavailable — crash detection paused.")
     market_mode = "UNKNOWN"
 else:
     if drop <= -0.20:
-        st.error("🔴 CRASH MODE — rotate some income into future Growth ETFs.")
+        st.error("🔴 CRASH MODE — rotate part of income into growth ETFs.")
         market_mode = "CRASH"
     elif drop <= -0.10:
-        st.warning("🟡 DOWNTREND — slow income buying, prepare to add growth.")
+        st.warning("🟡 DOWNTREND — slow income buying, prepare for growth adds.")
         market_mode = "DOWN"
     else:
-        st.success("🟢 NORMAL MODE — focus on building income.")
+        st.success("🟢 NORMAL MODE — build income aggressively.")
         market_mode = "NORMAL"
 
 # ==================================================
-# 📆 WEEKLY ACTION PLAN (ALWAYS VISIBLE)
+# 🚨 ETF-LEVEL RISK ALERTS
+# ==================================================
+
+st.markdown("## ⚠️ ETF Risk Alerts")
+
+risk_msgs = []
+
+for e in st.session_state.etfs:
+    d7, d30 = get_etf_risk(e["ETF"])
+
+    if d30 is not None and d30 <= -0.15:
+        risk_msgs.append(f"🔴 {e['ETF']} down {abs(d30)*100:.1f}% in 30 days — consider trimming.")
+    elif d7 is not None and d7 <= -0.07:
+        risk_msgs.append(f"🟡 {e['ETF']} weak this week — pause reinvestment.")
+
+if risk_msgs:
+    for m in risk_msgs:
+        st.warning(m)
+else:
+    st.success("All ETFs stable — no individual risk signals.")
+
+# ==================================================
+# 📆 WEEKLY ACTION PLAN + $ ROTATION
 # ==================================================
 
 st.markdown("## 📆 Weekly Action Plan")
 
 if market_mode == "NORMAL":
-    st.success("Reinvest all weekly income into QDTE / CHPY / XDTE (best value).")
+    st.success("Reinvest all weekly income into best-value income ETF.")
 
-elif market_mode == "DOWN":
-    st.warning("Start diverting NEW money to Growth ETFs when you add them.")
+elif market_mode in ["DOWN", "CRASH"]:
 
-elif market_mode == "CRASH":
-    st.error("Consider trimming income ETFs and rotating into Growth ETFs.")
+    income_df = df[df["Type"] == "Income"]
+    growth_df = df[df["Type"] == "Growth"]
+
+    rotate_amt = total_value * (0.10 if market_mode == "DOWN" else 0.20)
+
+    if not income_df.empty and not growth_df.empty:
+        from_etf = income_df.sort_values("Monthly Income").iloc[0]
+        to_etf = growth_df.sort_values("Value").iloc[0]
+
+        st.error(
+            f"🔁 Rotate about **${rotate_amt:,.0f}** from **{from_etf['ETF']}** "
+            f"into **{to_etf['ETF']}**"
+        )
+    else:
+        st.warning("Add Growth ETFs to enable crash rotations.")
 
 else:
-    st.info("Market signal unavailable — follow standard reinvestment plan.")
+    st.info("No market signal — follow standard reinvestment.")
 
 # ==================================================
 # USER INPUTS
@@ -168,7 +223,7 @@ monthly_add = st.number_input("Monthly cash added ($)", value=200, step=50)
 total_invested = st.number_input("Total invested to date ($)", value=11000, step=500)
 
 # ==================================================
-# ➕ MANAGE ETFs (ADD GROWTH LATER)
+# ➕ MANAGE ETFs
 # ==================================================
 
 with st.expander("➕ Manage ETFs", expanded=False):
@@ -292,4 +347,4 @@ with st.expander("📤 Save Snapshot", expanded=False):
         "text/csv"
     )
 
-st.caption("Phase 1: Build income with weekly ETFs → Phase 2: Add growth once $1k/month reached.")
+st.caption("Phase 1: Build income fast → Phase 2: Rotate into growth with protection.")
