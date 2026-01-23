@@ -8,8 +8,8 @@ from datetime import datetime
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.2.1", layout="centered")
-st.title("🔥 Income Strategy Engine v3.2.1")
+st.set_page_config(page_title="Income Engine v3.2.2", layout="centered")
+st.title("🔥 Income Strategy Engine v3.2.2")
 st.caption("Yield-driven income • risk alerts • rotation guidance")
 
 # ==================================================
@@ -183,7 +183,7 @@ disp["Volatility"] = disp["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x
 st.dataframe(disp, use_container_width=True)
 
 # ==================================================
-# 🚨 RISK & ROTATION ALERTS (SAFE)
+# 🚨 RISK & ROTATION ALERTS (CRASH-PROOF)
 # ==================================================
 
 st.markdown("## 🚨 Risk & Rotation Alerts")
@@ -191,9 +191,8 @@ st.markdown("## 🚨 Risk & Rotation Alerts")
 alerts = []
 risk_score = 0
 
-# --- Market drawdown ---
 qqq_hist = get_price_history("QQQ")
-if qqq_hist is not None and len(qqq_hist) > 21:
+if qqq_hist is not None and len(qqq_hist) >= 21:
     past = float(qqq_hist["Close"].iloc[-21])
     now = float(qqq_hist["Close"].iloc[-1])
     if past > 0:
@@ -206,8 +205,9 @@ if qqq_hist is not None and len(qqq_hist) > 21:
             alerts.append(f"🟠 QQQ down {drawdown*100:.1f}% in last month")
         else:
             alerts.append("🟢 Market trend stable")
+else:
+    alerts.append("⚪ Market trend data unavailable")
 
-# --- High yield concentration ---
 if total_value > 0:
     hy_pct = high_yield_value / total_value
     if hy_pct > 0.7:
@@ -219,7 +219,6 @@ if total_value > 0:
     else:
         alerts.append("🟢 Allocation balanced")
 
-# --- ETF trend warnings ---
 etf_warnings = []
 
 for etf in HIGH_YIELD_ETFS:
@@ -228,26 +227,28 @@ for etf in HIGH_YIELD_ETFS:
         continue
 
     close = hist["Close"]
-    ma20 = close.rolling(20).mean().iloc[-1]
     price = close.iloc[-1]
-    trend = (price - close.iloc[-15]) / close.iloc[-15] if close.iloc[-15] != 0 else 0
+    ma20 = close.rolling(20).mean().iloc[-1]
 
-    if pd.notna(ma20) and pd.notna(price):
+    trend = None
+    if len(close) >= 15 and close.iloc[-15] != 0:
+        trend = (price - close.iloc[-15]) / close.iloc[-15]
+
+    if trend is not None and pd.notna(ma20):
         if price < ma20 and trend < -0.05:
             risk_score += 1
-            etf_warnings.append(f"🔴 {etf} trending down >5%")
+            etf_warnings.append(f"🔴 {etf} strong downtrend")
         elif price < ma20:
             etf_warnings.append(f"🟠 {etf} below 20d average")
 
-# --- Overall status ---
 if risk_score >= 4:
     st.error("🚨 DEFENSIVE ACTION RECOMMENDED")
-    st.write("👉 Consider rotating 15–25% from high-yield ETFs into growth ETFs.")
+    st.write("👉 Rotate 15–25% from high-yield into growth ETFs.")
 elif risk_score >= 2:
     st.warning("⚠ CAUTION — Prepare to derisk")
-    st.write("👉 Consider rotating 5–10% into growth ETFs.")
+    st.write("👉 Rotate 5–10% into growth ETFs.")
 else:
-    st.success("🟢 RISK NORMAL — Strategy can remain aggressive")
+    st.success("🟢 RISK NORMAL — Aggressive income allowed")
 
 for a in alerts:
     st.write(a)
