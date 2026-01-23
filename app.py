@@ -2,21 +2,24 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ==================================================
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.1", layout="centered")
-st.title("🔥 Income Strategy Engine v3.1")
-st.caption("Ex-date timing • market stress mode • income optimization")
+st.set_page_config(page_title="Income Engine v3.2", layout="centered")
+st.title("🔥 Income Strategy Engine v3.2")
+st.caption("Income strategy • risk alerts • rotation guidance")
 
 # ==================================================
 # SETTINGS
 # ==================================================
 
 ETF_LIST = ["CHPY", "QDTE", "XDTE", "JEPQ", "AIPI"]
+HIGH_YIELD_ETFS = ["CHPY", "QDTE", "XDTE", "AIPI"]
+GROWTH_ETFS = ["SPYI", "JEPQ", "ARCC", "MAIN", "KGLD", "VOO"]
+
 BENCH = "QQQ"
 INCOME_LOOKBACK_MONTHS = 4
 TARGET1 = 1000
@@ -50,13 +53,12 @@ total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000
 @st.cache_data(ttl=600)
 def get_price(ticker):
     try:
-        d = yf.download(ticker, period="5d", interval="1d", progress=False)
+        d = yf.download(ticker, period="60d", interval="1d", progress=False)
         if d is None or d.empty:
-            return None
-        v = float(d["Close"].iloc[-1])
-        return v if np.isfinite(v) else None
+            return None, None
+        return float(d["Close"].iloc[-1]), d
     except:
-        return None
+        return None, None
 
 
 @st.cache_data(ttl=3600)
@@ -107,8 +109,8 @@ def get_intraday_change(ticker):
 @st.cache_data(ttl=3600)
 def get_volatility(ticker):
     try:
-        d = yf.download(ticker, period="6mo", interval="1d", progress=False)
-        if d is None or len(d) < 30:
+        d = yf.download(ticker, period="60d", interval="1d", progress=False)
+        if d is None or len(d) < 20:
             return np.nan
         v = d["Close"].pct_change().std()
         return float(v) if np.isfinite(v) else np.nan
@@ -147,10 +149,15 @@ rows = []
 total_value = 0
 total_monthly_income = 0
 total_annual_divs = 0
+high_yield_value = 0
+
+price_cache = {}
 
 for etf in ETF_LIST:
     sh = holdings.get(etf,0)
-    price = get_price(etf)
+    price, hist = get_price(etf)
+    price_cache[etf] = hist
+
     if price is None:
         continue
 
@@ -162,6 +169,9 @@ for etf in ETF_LIST:
     total_value += val
     total_monthly_income += inc
     total_annual_divs += inc * 12
+
+    if etf in HIGH_YIELD_ETFS:
+        high_yield_value += val
 
     zone = "HOLD"
     if last_ex is not None:
@@ -217,6 +227,81 @@ if holds:
     st.info("⚪ HOLD: " + ", ".join(holds))
 
 # ==================================================
+# 🚨 RISK & ROTATION ALERT SYSTEM (NEW)
+# ==================================================
+
+st.markdown("## 🚨 Risk & Rotation Alerts")
+
+alerts = []
+risk_score = 0
+
+# --- Market drawdown (30d) ---
+qqq_price, qqq_hist = get_price("QQQ")
+if qqq_hist is not None and len(qqq_hist) >= 21:
+    past = float(qqq_hist["Close"].iloc[-21])
+    now = float(qqq_hist["Close"].iloc[-1])
+    drawdown = (now - past) / past
+
+    if drawdown < -0.12:
+        risk_score += 2
+        alerts.append(f"🔴 QQQ down {drawdown*100:.1f}% in 30 days")
+    elif drawdown < -0.08:
+        risk_score += 1
+        alerts.append(f"🟠 QQQ down {drawdown*100:.1f}% in 30 days")
+    else:
+        alerts.append("🟢 Market trend stable")
+
+# --- High yield concentration ---
+if total_value > 0:
+    hy_pct = high_yield_value / total_value
+    if hy_pct > 0.7:
+        risk_score += 2
+        alerts.append(f"🔴 High-yield concentration {hy_pct*100:.0f}%")
+    elif hy_pct > 0.6:
+        risk_score += 1
+        alerts.append(f"🟠 High-yield concentration {hy_pct*100:.0f}%")
+    else:
+        alerts.append("🟢 Allocation balanced")
+
+# --- ETF specific trend alerts ---
+etf_warnings = []
+
+for etf in HIGH_YIELD_ETFS:
+    hist = price_cache.get(etf)
+    if hist is None or len(hist) < 20:
+        continue
+
+    ma20 = hist["Close"].rolling(20).mean().iloc[-1]
+    price = hist["Close"].iloc[-1]
+    trend = (price - hist["Close"].iloc[-15]) / hist["Close"].iloc[-15]
+
+    if price < ma20 and trend < -0.05:
+        risk_score += 1
+        etf_warnings.append(f"🔴 {etf} trending down >5% in 3 weeks")
+    elif price < ma20:
+        etf_warnings.append(f"🟠 {etf} below 20d average")
+
+# --- Overall risk status ---
+if risk_score >= 4:
+    st.error("🚨 DEFENSIVE ACTION RECOMMENDED")
+    st.write("👉 Consider shifting 15–25% from high-yield ETFs into growth ETFs.")
+elif risk_score >= 2:
+    st.warning("⚠ CAUTION — Monitor and prepare to derisk")
+    st.write("👉 Consider shifting 5–10% from high-yield ETFs into growth ETFs.")
+else:
+    st.success("🟢 RISK NORMAL — Strategy can remain aggressive")
+
+# --- Show details ---
+for a in alerts:
+    st.write(a)
+
+for w in etf_warnings:
+    st.write(w)
+
+if etf_warnings:
+    st.info("Suggested rotation targets: " + ", ".join(GROWTH_ETFS))
+
+# ==================================================
 # FASTEST PATH OPTIMIZER
 # ==================================================
 
@@ -244,7 +329,7 @@ else:
     st.info("Optimizer unavailable — no valid ETF data.")
 
 # ==================================================
-# TIERED INCOME SIMULATOR (REALISTIC)
+# TIERED INCOME SIMULATOR
 # ==================================================
 
 st.markdown("## 🎯 Income Milestone Simulator (Realistic)")
@@ -259,7 +344,7 @@ if total_value > 0 and total_monthly_income > 0:
     months_to_1k = None
     months_to_2k = None
 
-    for m in range(1, 241):  # 20 years
+    for m in range(1, 241):
 
         if proj_income < TARGET1:
             reinv = proj_income
