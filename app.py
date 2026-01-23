@@ -7,292 +7,220 @@ from datetime import datetime
 # ==================================================
 # PAGE
 # ==================================================
+
 st.set_page_config(page_title="Income Strategy Engine v4.3", layout="centered")
 st.title("🔥 Income Strategy Engine v4.3")
-st.caption("Crash mode • allocation optimizer • income tracking")
-
-TARGET1 = 1000
-TARGET2 = 1500
+st.caption("Dynamic ETF list • crash alerts • rotation guidance")
 
 # ==================================================
-# SESSION STATE
+# DEFAULT SESSION STATE
 # ==================================================
+
 if "etfs" not in st.session_state:
     st.session_state.etfs = [
-        {"ticker":"QDTE","type":"High Yield","shares":110},
-        {"ticker":"XDTE","type":"High Yield","shares":69},
-        {"ticker":"CHPY","type":"High Yield","shares":55},
-        {"ticker":"AIPI","type":"High Yield","shares":14},
-        {"ticker":"SPYI","type":"Growth","shares":0},
-        {"ticker":"JEPQ","type":"Growth","shares":19},
-        {"ticker":"ARCC","type":"Growth","shares":0},
-        {"ticker":"MAIN","type":"Growth","shares":0},
-        {"ticker":"KGLD","type":"Growth","shares":0},
+        {"ticker": "QDTE", "shares": 110, "type": "Income"},
+        {"ticker": "XDTE", "shares": 69, "type": "Income"},
+        {"ticker": "CHPY", "shares": 55, "type": "Income"},
+        {"ticker": "AIPI", "shares": 14, "type": "Income"},
+        {"ticker": "SPYI", "shares": 0, "type": "Growth"},
+        {"ticker": "JEPQ", "shares": 19, "type": "Growth"},
+        {"ticker": "ARCC", "shares": 0, "type": "Growth"},
+        {"ticker": "MAIN", "shares": 0, "type": "Growth"},
+        {"ticker": "KGLD", "shares": 0, "type": "Growth"},
     ]
 
+if "snapshots" not in st.session_state:
+    st.session_state.snapshots = []
+
 # ==================================================
-# SAFE DATA
+# HELPERS
 # ==================================================
-@st.cache_data(ttl=900)
-def get_price_history(t):
+
+@st.cache_data(ttl=600)
+def get_price(ticker):
     try:
-        d = yf.download(t, period="60d", interval="1d", progress=False)
+        d = yf.download(ticker, period="5d", interval="1d", progress=False)
         if d is None or d.empty:
             return None
-        d = d.dropna()
-        if len(d) < 10:
-            return None
-        return d
+        return float(d["Close"].iloc[-1])
     except:
         return None
 
-def safe_last(hist):
+
+@st.cache_data(ttl=3600)
+def get_monthly_income_est(ticker):
     try:
-        p = float(hist["Close"].iloc[-1])
-        return p if np.isfinite(p) and p > 0 else None
+        divs = yf.Ticker(ticker).dividends
+        if divs is None or divs.empty:
+            return 0
+        divs.index = pd.to_datetime(divs.index)
+        recent = divs[divs.index >= (pd.Timestamp.now() - pd.DateOffset(months=4))]
+        if recent.empty:
+            return 0
+        return float(recent.sum() / 4)
     except:
-        return None
+        return 0
 
-def safe_drawdown(hist):
+
+@st.cache_data(ttl=600)
+def get_market_drawdown():
     try:
-        h = hist["Close"].max()
-        l = hist["Close"].iloc[-1]
-        if h > 0:
-            return (l - h) / h
-        return None
+        d = yf.download("QQQ", period="6mo", interval="1d", progress=False)
+        close = d["Close"]
+        high = close.max()
+        now = close.iloc[-1]
+        return (now - high) / high
     except:
         return None
 
 # ==================================================
-# MARKET CRASH MODE (QQQ INDICATOR ONLY)
+# MARKET MODE (TOP BANNER)
 # ==================================================
-qqq_hist = get_price_history("QQQ")
-market_mode = "NORMAL"
 
-if qqq_hist is not None:
-    dd = safe_drawdown(qqq_hist)
-    if dd is not None:
-        if dd < -0.15:
-            market_mode = "CRASH"
-        elif dd < -0.08:
-            market_mode = "DEFENSIVE"
+dd = get_market_drawdown()
 
-# ==================================================
-# TOP RISK BANNER
-# ==================================================
-if market_mode == "CRASH":
-    st.error("🚨 MARKET CRASH MODE — Pause income buying, push new money to Growth ETFs")
-elif market_mode == "DEFENSIVE":
-    st.warning("⚠️ DEFENSIVE MODE — Tilt new money toward Growth ETFs")
+if dd is None:
+    st.info("⚪ Market data unavailable — crash detection paused.")
+    market_mode = "UNKNOWN"
+elif dd < -0.20:
+    st.error("🔴 CRASH MODE — rotate into Growth ETFs aggressively")
+    market_mode = "CRASH"
+elif dd < -0.10:
+    st.warning("🟡 DEFENSIVE MODE — tilt new money to Growth ETFs")
+    market_mode = "DEFENSIVE"
 else:
-    st.success("🟢 MARKET STABLE — Normal income strategy")
+    st.success("🟢 NORMAL MODE — income strategy active")
+    market_mode = "NORMAL"
 
 # ==================================================
-# ➕ MANAGE ETFs
+# MANAGE ETFs
 # ==================================================
+
 with st.expander("➕ Manage ETFs", expanded=False):
+    for i, etf in enumerate(st.session_state.etfs):
+        cols = st.columns([3, 2, 3, 1])
+        cols[0].write(etf["ticker"])
+        etf["shares"] = cols[1].number_input("Shares", 0, 100000, etf["shares"], key=f"s{i}")
+        etf["type"] = cols[2].selectbox("Type", ["Income", "Growth"], index=0 if etf["type"]=="Income" else 1, key=f"t{i}")
+        if cols[3].button("❌", key=f"r{i}"):
+            st.session_state.etfs.pop(i)
+            st.rerun()
 
-    c1, c2, c3 = st.columns(3)
-    new_ticker = c1.text_input("Ticker").upper()
-    new_type = c2.selectbox("Type", ["High Yield","Growth"])
-    new_shares = c3.number_input("Shares", 0, 100000, 0, 1)
-
+    st.divider()
+    new_ticker = st.text_input("Add ETF (ticker)").upper()
+    new_type = st.selectbox("Type", ["Income", "Growth"], key="newtype")
     if st.button("Add ETF"):
         if new_ticker:
-            st.session_state.etfs.append({
-                "ticker":new_ticker,"type":new_type,"shares":new_shares
-            })
-            st.experimental_rerun()
-
-    st.markdown("### Current ETFs")
-
-    for i,e in enumerate(st.session_state.etfs):
-        cols = st.columns([2,2,2,1])
-        cols[0].write(e["ticker"])
-        e["shares"] = cols[1].number_input("Shares",0,100000,e["shares"],1,key=f"s{i}")
-        e["type"] = cols[2].selectbox("Type",["High Yield","Growth"],index=0 if e["type"]=="High Yield" else 1,key=f"t{i}")
-        if cols[3].button("❌",key=f"r{i}"):
-            st.session_state.etfs.pop(i)
-            st.experimental_rerun()
+            st.session_state.etfs.append({"ticker": new_ticker, "shares": 0, "type": new_type})
+            st.rerun()
 
 # ==================================================
-# PORTFOLIO
+# PORTFOLIO SNAPSHOT
 # ==================================================
-rows = []
-total_value = 0
-total_income = 0
 
-for e in st.session_state.etfs:
-
-    hist = get_price_history(e["ticker"])
-    if hist is None:
-        continue
-
-    price = safe_last(hist)
-    if price is None:
-        continue
-
-    val = price * e["shares"]
-
-    est_yield = 0.35 if e["type"]=="High Yield" else 0.08
-    inc = val * est_yield / 12
-
-    dd = safe_drawdown(hist)
-
-    total_value += val
-    total_income += inc
-
-    rows.append([e["ticker"],e["type"],e["shares"],price,val,inc,dd])
-
-df = pd.DataFrame(rows, columns=["ETF","Type","Shares","Price","Value","Monthly Income","30d Drawdown"])
-
-# ==================================================
-# SNAPSHOT
-# ==================================================
 with st.expander("📊 Portfolio Snapshot", expanded=True):
 
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Portfolio Value", f"${total_value:,.0f}")
-    c2.metric("Monthly Income", f"${total_income:,.0f}")
-    c3.metric("Progress to $1k", f"{(total_income/TARGET1)*100:.1f}%")
+    rows = []
+    total_value = 0
+    total_income = 0
 
-    if not df.empty:
-        d = df.copy()
-        d["Price"] = d["Price"].map("${:,.2f}".format)
-        d["Value"] = d["Value"].map("${:,.0f}".format)
-        d["Monthly Income"] = d["Monthly Income"].map("${:,.0f}".format)
-        d["30d Drawdown"] = d["30d Drawdown"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
-        st.dataframe(d, use_container_width=True)
+    for etf in st.session_state.etfs:
+        price = get_price(etf["ticker"])
+        income = get_monthly_income_est(etf["ticker"]) * etf["shares"]
+        value = (price or 0) * etf["shares"]
+
+        total_value += value
+        total_income += income
+
+        rows.append([
+            etf["ticker"], etf["type"], etf["shares"],
+            price, value, income
+        ])
+
+    df = pd.DataFrame(rows, columns=["ETF","Type","Shares","Price","Value","Monthly Income"])
+
+    st.metric("Portfolio Value", f"${total_value:,.0f}")
+    st.metric("Monthly Income", f"${total_income:,.0f}")
+
+    disp = df.copy()
+    disp["Price"] = disp["Price"].map(lambda x: f"${x:,.2f}" if pd.notna(x) else "—")
+    disp["Value"] = disp["Value"].map(lambda x: f"${x:,.0f}")
+    disp["Monthly Income"] = disp["Monthly Income"].map(lambda x: f"${x:,.0f}")
+
+    st.dataframe(disp, use_container_width=True)
 
 # ==================================================
-# ETF RISK + ROTATION
+# RISK & ROTATION ALERTS
 # ==================================================
+
 with st.expander("🚨 Risk & Rotation Alerts", expanded=True):
 
-    high = df[df["Type"]=="High Yield"]
-    growth = df[df["Type"]=="Growth"]
+    income_etfs = df[df["Type"]=="Income"]
+    growth_etfs = df[df["Type"]=="Growth"]
 
-    alerts = high[high["30d Drawdown"] < -0.10]
-
-    if alerts.empty and market_mode=="NORMAL":
-        st.success("No income ETF breakdowns detected.")
+    if market_mode in ["CRASH", "DEFENSIVE"] and len(growth_etfs) > 0:
+        st.warning("Rotate new money into Growth ETFs:")
+        st.write(", ".join(growth_etfs["ETF"].tolist()))
     else:
-        if market_mode=="CRASH":
-            st.error("Market crash — rotate aggressively into Growth ETFs.")
-            move_pct = 0.4
-        elif market_mode=="DEFENSIVE":
-            st.warning("Defensive mode — reduce income exposure.")
-            move_pct = 0.2
-        else:
-            move_pct = 0.15
-
-        for _,r in alerts.iterrows():
-            sell_amt = r["Value"] * move_pct
-            st.error(f"{r['ETF']} down {r['30d Drawdown']*100:.1f}%")
-            st.write(f"Rotate ~${sell_amt:,.0f} into Growth ETFs")
-
-            if len(growth)>0:
-                per = sell_amt / len(growth)
-                for _,g in growth.iterrows():
-                    sh = per / g["Price"]
-                    st.write(f"• {g['ETF']}: ${per:,.0f} (~{sh:.1f} shares)")
+        st.success("No income ETF breakdowns detected.")
 
 # ==================================================
-# AUTO ALLOCATION OPTIMIZER
+# AFTER $1K SIMULATOR
 # ==================================================
-with st.expander("🤖 Weekly Allocation Optimizer", expanded=True):
 
-    new_cash = st.number_input("New money this week/month ($)",0,5000,200,50)
+with st.expander("🔁 After $1k Strategy Simulator", expanded=False):
 
-    if new_cash > 0:
-        if market_mode=="CRASH":
-            st.error("CRASH MODE → 100% into Growth ETFs")
-            targets = df[df["Type"]=="Growth"]
-        elif total_income < TARGET1:
-            st.info("Income build phase → focus High Yield ETFs")
-            targets = df[df["Type"]=="High Yield"]
-        else:
-            st.info("Balanced phase → split Income + Growth")
-            targets = df
+    TARGET = 1000
+    monthly_add = st.number_input("Monthly Contribution ($)", 0, 5000, 200, 50)
 
-        if len(targets)>0:
-            per = new_cash / len(targets)
-            for _,r in targets.iterrows():
-                sh = per / r["Price"]
-                st.write(f"• {r['ETF']}: ${per:,.0f} (~{sh:.2f} shares)")
-        else:
-            st.warning("No suitable ETFs available.")
+    if total_value > 0 and total_income > 0:
+        avg_yield = total_income * 12 / total_value
 
-# ==================================================
-# MILESTONE FORECAST
-# ==================================================
-with st.expander("🎯 Months to $1k / $1.5k", expanded=False):
+        proj_income = total_income
+        proj_value = total_value
 
-    if total_value>0 and total_income>0:
-        avg_yield = total_income*12/total_value
-
-        val = total_value
-        inc = total_income
-
-        m1 = None
-        m2 = None
-
-        for m in range(1,241):
-            if inc < TARGET1:
-                reinv = inc
+        for _ in range(180):
+            if proj_income < TARGET:
+                reinv = proj_income
             else:
-                reinv = inc * 0.5
+                reinv = proj_income * 0.5
 
-            val += reinv
-            inc = val * avg_yield / 12
+            proj_value += monthly_add + reinv
+            proj_income = proj_value * avg_yield / 12
 
-            if m1 is None and inc>=TARGET1: m1=m
-            if m2 is None and inc>=TARGET2: m2=m
-
-        st.metric("Months to $1k", m1 if m1 else "—")
-        st.metric("Months to $1.5k", m2 if m2 else "—")
-
-# ==================================================
-# CHARTS FROM SNAPSHOTS
-# ==================================================
-with st.expander("📈 Income & Portfolio Growth Charts", expanded=False):
-
-    files = st.file_uploader(
-        "Upload your snapshot CSV files (multiple)",
-        accept_multiple_files=True,
-        type=["csv"]
-    )
-
-    if files:
-        all_df = []
-        for f in files:
-            d = pd.read_csv(f)
-            if "Snapshot Time" in d.columns:
-                t = pd.to_datetime(d["Snapshot Time"].iloc[0])
-                total_val = d["Value"].sum()
-                total_inc = d["Monthly Income"].sum()
-                all_df.append([t,total_val,total_inc])
-
-        hist = pd.DataFrame(all_df, columns=["Time","Value","Income"]).sort_values("Time")
-
-        st.line_chart(hist.set_index("Time")[["Value"]])
-        st.line_chart(hist.set_index("Time")[["Income"]])
+        st.metric("Projected Income After 15y", f"${proj_income:,.0f}/mo")
+        st.metric("Projected Portfolio After 15y", f"${proj_value:,.0f}")
+    else:
+        st.info("Simulator unavailable — income data missing.")
 
 # ==================================================
-# EXPORT
+# TRUE RETURNS
 # ==================================================
+
+with st.expander("🧾 True Return Tracking", expanded=False):
+
+    total_contrib = st.number_input("Total Contributions ($)", 0, 1_000_000, 10000, 500)
+    annual_income = total_income * 12
+    gain = total_value + annual_income - total_contrib
+    roi = gain / total_contrib if total_contrib else 0
+
+    st.metric("Next 12mo Income", f"${annual_income:,.0f}")
+    st.metric("True ROI", f"{roi*100:.1f}%")
+
+# ==================================================
+# SNAPSHOT SAVE
+# ==================================================
+
 with st.expander("📤 Save Snapshot", expanded=False):
 
-    export = df.copy()
-    export["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if st.button("Save Snapshot"):
+        st.session_state.snapshots.append({
+            "time": datetime.now(),
+            "value": total_value,
+            "income": total_income
+        })
+        st.success("Snapshot saved.")
 
-    csv = export.to_csv(index=False).encode("utf-8")
-
-    st.download_button(
-        "⬇ Download Snapshot CSV",
-        csv,
-        f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-        "text/csv",
-    )
-
-st.caption("Risk engine uses QQQ only as market indicator — all allocations use your real portfolio ETFs.")
+    if len(st.session_state.snapshots) > 1:
+        snap_df = pd.DataFrame(st.session_state.snapshots)
+        st.line_chart(snap_df.set_index("time")[["value","income"]])
