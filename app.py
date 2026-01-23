@@ -67,6 +67,7 @@ def get_price(ticker):
     except:
         return None
 
+
 @st.cache_data(ttl=900)
 def get_market_drop():
     try:
@@ -81,23 +82,17 @@ def get_market_drop():
     except:
         return None
 
+
 @st.cache_data(ttl=900)
-def get_etf_risk(ticker):
+def get_etf_history(ticker):
     try:
         d = yf.download(ticker, period="2mo", interval="1d", progress=False)
         if d is None or len(d) < 10:
-            return None, None
-
-        last = d["Close"].iloc[-1]
-        high_30 = d["Close"].rolling(30).max().iloc[-1]
-        high_7 = d["Close"].rolling(7).max().iloc[-1]
-
-        drop_30 = (last - high_30) / high_30 if high_30 else None
-        drop_7 = (last - high_7) / high_7 if high_7 else None
-
-        return drop_7, drop_30
+            return None
+        return d
     except:
-        return None, None
+        return None
+
 
 # ==================================================
 # BUILD PORTFOLIO
@@ -145,7 +140,8 @@ st.markdown("## 🚨 Market & Income Status")
 drop = get_market_drop()
 
 if total_monthly_income > 0 and total_value > 0:
-    est_gain = (total_monthly_income + 200) * (total_monthly_income / total_value)
+    monthly_add = 200
+    est_gain = (total_monthly_income + monthly_add) * (total_monthly_income / total_value)
     months_to_1k = max(int((1000 - total_monthly_income) / max(est_gain, 1)), 1)
     st.info(f"⏱️ Estimated time to reach $1,000/month: **~{months_to_1k} months**")
 
@@ -164,56 +160,85 @@ else:
         market_mode = "NORMAL"
 
 # ==================================================
-# 🚨 ETF-LEVEL RISK ALERTS
+# 🚨 ETF-LEVEL RISK + PAYOUT STABILITY (B)
 # ==================================================
 
-st.markdown("## ⚠️ ETF Risk Alerts")
+st.markdown("## ⚠️ ETF Risk & Payout Stability")
 
 risk_msgs = []
 
 for e in st.session_state.etfs:
-    d7, d30 = get_etf_risk(e["ETF"])
+    hist = get_etf_history(e["ETF"])
+    if hist is None:
+        continue
 
-    if d30 is not None and d30 <= -0.15:
-        risk_msgs.append(f"🔴 {e['ETF']} down {abs(d30)*100:.1f}% in 30 days — consider trimming.")
-    elif d7 is not None and d7 <= -0.07:
-        risk_msgs.append(f"🟡 {e['ETF']} weak this week — pause reinvestment.")
+    last = hist["Close"].iloc[-1]
+    ma30 = hist["Close"].rolling(30).mean().iloc[-1]
+    high30 = hist["Close"].rolling(30).max().iloc[-1]
+
+    drop30 = (last - high30) / high30 if high30 else None
+    dip = (last - ma30) / ma30 if ma30 else None
+
+    if drop30 is not None and drop30 <= -0.15:
+        risk_msgs.append(f"🔴 {e['ETF']} down {abs(drop30)*100:.1f}% in 30d — risk rising.")
+    elif dip is not None and dip <= -0.07:
+        risk_msgs.append(f"🟡 {e['ETF']} weak this week — consider pausing adds.")
 
 if risk_msgs:
     for m in risk_msgs:
         st.warning(m)
 else:
-    st.success("All ETFs stable — no individual risk signals.")
+    st.success("All ETFs stable — no payout-risk signals.")
 
 # ==================================================
-# 📆 WEEKLY ACTION PLAN + $ ROTATION
+# 📆 WEEKLY ACTION PLAN + OPTIMIZER (A + C)
 # ==================================================
 
 st.markdown("## 📆 Weekly Action Plan")
 
-if market_mode == "NORMAL":
-    st.success("Reinvest all weekly income into best-value income ETF.")
+scores = []
 
-elif market_mode in ["DOWN", "CRASH"]:
+for e in st.session_state.etfs:
+    hist = get_etf_history(e["ETF"])
+    if hist is None:
+        continue
 
-    income_df = df[df["Type"] == "Income"]
-    growth_df = df[df["Type"] == "Growth"]
+    ret30 = hist["Close"].pct_change(30).iloc[-1]
+    vol = hist["Close"].pct_change().std()
 
+    score = (ret30 if pd.notna(ret30) else 0) - (vol if pd.notna(vol) else 0)
+    scores.append((e["ETF"], score))
+
+if scores:
+    best = sorted(scores, key=lambda x: x[1], reverse=True)[0][0]
+    st.success(f"✅ Best ETF to reinvest into this week: **{best}**")
+
+if market_mode in ["DOWN", "CRASH"]:
     rotate_amt = total_value * (0.10 if market_mode == "DOWN" else 0.20)
+    st.error(f"🔁 Consider rotating about **${rotate_amt:,.0f}** into Growth ETFs when added.")
+elif market_mode == "NORMAL":
+    st.success("Reinvest weekly income into strongest income ETF.")
 
-    if not income_df.empty and not growth_df.empty:
-        from_etf = income_df.sort_values("Monthly Income").iloc[0]
-        to_etf = growth_df.sort_values("Value").iloc[0]
+# ==================================================
+# 🔮 SHORT-TERM INCOME FORECAST (D)
+# ==================================================
 
-        st.error(
-            f"🔁 Rotate about **${rotate_amt:,.0f}** from **{from_etf['ETF']}** "
-            f"into **{to_etf['ETF']}**"
-        )
-    else:
-        st.warning("Add Growth ETFs to enable crash rotations.")
+st.markdown("## 🔮 Short-Term Income Forecast")
 
-else:
-    st.info("No market signal — follow standard reinvestment.")
+if total_value > 0 and total_monthly_income > 0:
+
+    avg_yield = total_monthly_income * 12 / total_value
+    weekly_income = total_monthly_income / 4
+
+    val_4w = total_value + weekly_income * 4
+    val_12w = total_value + weekly_income * 12
+
+    inc_4w = val_4w * avg_yield / 12
+    inc_12w = val_12w * avg_yield / 12
+
+    c1, c2 = st.columns(2)
+    c1.metric("Income in 4 weeks", f"${inc_4w:,.0f}/mo")
+    c2.metric("Income in 12 weeks", f"${inc_12w:,.0f}/mo")
 
 # ==================================================
 # USER INPUTS
@@ -347,4 +372,4 @@ with st.expander("📤 Save Snapshot", expanded=False):
         "text/csv"
     )
 
-st.caption("Phase 1: Build income fast → Phase 2: Rotate into growth with protection.")
+st.caption("Phase 1: Optimize income weekly → Phase 2: rotate into growth with protection.")
