@@ -8,8 +8,8 @@ from datetime import datetime
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.2.2", layout="centered")
-st.title("🔥 Income Strategy Engine v3.2.2")
+st.set_page_config(page_title="Income Engine v3.2.3", layout="centered")
+st.title("🔥 Income Strategy Engine v3.2.3")
 st.caption("Yield-driven income • risk alerts • rotation guidance")
 
 # ==================================================
@@ -66,16 +66,16 @@ st.markdown("## 🧾 Total Contributions So Far")
 total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000, 10000, 500)
 
 # ==================================================
-# HELPERS
+# DATA HELPERS (SAFE)
 # ==================================================
 
 @st.cache_data(ttl=600)
 def get_price_history(ticker):
     try:
-        d = yf.download(ticker, period="90d", interval="1d", progress=False)
+        d = yf.download(ticker, period="120d", interval="1d", progress=False)
         if d is None or d.empty:
             return None
-        return d
+        return d.dropna()
     except:
         return None
 
@@ -102,8 +102,7 @@ def get_volatility(ticker):
         d = yf.download(ticker, period="60d", interval="1d", progress=False)
         if d is None or len(d) < 20:
             return np.nan
-        v = d["Close"].pct_change().std()
-        return float(v) if np.isfinite(v) else np.nan
+        return float(d["Close"].pct_change().std())
     except:
         return np.nan
 
@@ -146,7 +145,7 @@ for etf in ETF_LIST:
     hist = get_price_history(etf)
     price_hist[etf] = hist
 
-    if hist is None:
+    if hist is None or hist.empty:
         continue
 
     price = float(hist["Close"].iloc[-1])
@@ -183,7 +182,7 @@ disp["Volatility"] = disp["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x
 st.dataframe(disp, use_container_width=True)
 
 # ==================================================
-# 🚨 RISK & ROTATION ALERTS (CRASH-PROOF)
+# 🚨 RISK & ROTATION ALERTS (SAFE LOGIC)
 # ==================================================
 
 st.markdown("## 🚨 Risk & Rotation Alerts")
@@ -192,19 +191,18 @@ alerts = []
 risk_score = 0
 
 qqq_hist = get_price_history("QQQ")
+
 if qqq_hist is not None and len(qqq_hist) >= 21:
-    past = float(qqq_hist["Close"].iloc[-21])
-    now = float(qqq_hist["Close"].iloc[-1])
-    if past > 0:
-        drawdown = (now - past) / past
-        if drawdown < -0.12:
-            risk_score += 2
-            alerts.append(f"🔴 QQQ down {drawdown*100:.1f}% in last month")
-        elif drawdown < -0.08:
-            risk_score += 1
-            alerts.append(f"🟠 QQQ down {drawdown*100:.1f}% in last month")
-        else:
-            alerts.append("🟢 Market trend stable")
+    monthly_ret = qqq_hist["Close"].pct_change(21).iloc[-1]
+
+    if monthly_ret < -0.12:
+        risk_score += 2
+        alerts.append(f"🔴 QQQ down {monthly_ret*100:.1f}% in last month")
+    elif monthly_ret < -0.08:
+        risk_score += 1
+        alerts.append(f"🟠 QQQ down {monthly_ret*100:.1f}% in last month")
+    else:
+        alerts.append("🟢 Market trend stable")
 else:
     alerts.append("⚪ Market trend data unavailable")
 
@@ -228,13 +226,11 @@ for etf in HIGH_YIELD_ETFS:
 
     close = hist["Close"]
     price = close.iloc[-1]
+
     ma20 = close.rolling(20).mean().iloc[-1]
+    trend = close.pct_change(10).iloc[-1]
 
-    trend = None
-    if len(close) >= 15 and close.iloc[-15] != 0:
-        trend = (price - close.iloc[-15]) / close.iloc[-15]
-
-    if trend is not None and pd.notna(ma20):
+    if pd.notna(ma20) and pd.notna(trend):
         if price < ma20 and trend < -0.05:
             risk_score += 1
             etf_warnings.append(f"🔴 {etf} strong downtrend")
