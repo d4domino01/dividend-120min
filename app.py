@@ -3,15 +3,14 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import math
 
 # ==================================================
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.4", layout="centered")
-st.title("🔥 Income Strategy Engine v3.4")
-st.caption("ETF crash detection • rotation guidance • income tracking")
+st.set_page_config(page_title="Income Engine v3.5", layout="centered")
+st.title("🔥 Income Strategy Engine v3.5")
+st.caption("Crash-proof ETF risk detection • rotation guidance • income tracking")
 
 # ==================================================
 # ETF GROUPS
@@ -47,23 +46,39 @@ st.markdown("## 🧾 Total Contributions So Far")
 total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000, 10000, 500)
 
 # ==================================================
-# PRICE HELPERS
+# SAFE DATA HELPERS
 # ==================================================
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=900)
 def get_price_history(ticker):
     try:
         d = yf.download(ticker, period="45d", interval="1d", progress=False)
         if d is None or d.empty:
             return None
-        return d.dropna()
+        d = d.dropna()
+        if len(d) < 5:
+            return None
+        return d
     except:
         return None
 
 
-def get_last_price(hist):
+def safe_last_price(hist):
     try:
-        return float(hist["Close"].iloc[-1])
+        p = float(hist["Close"].iloc[-1])
+        if np.isfinite(p) and p > 0:
+            return p
+        return None
+    except:
+        return None
+
+
+def safe_30d_high(hist):
+    try:
+        h = float(hist["Close"].max())
+        if np.isfinite(h) and h > 0:
+            return h
+        return None
     except:
         return None
 
@@ -76,18 +91,19 @@ total_value = 0
 total_monthly_income = 0
 
 for etf in ETF_LIST:
+
     hist = get_price_history(etf)
     if hist is None:
         continue
 
-    price = get_last_price(hist)
+    price = safe_last_price(hist)
     if price is None:
         continue
 
     sh = holdings.get(etf,0)
     val = sh * price
 
-    # income placeholder (can be upgraded later)
+    # simple yield assumptions (can be replaced later)
     est_yield = 0.35 if etf in HIGH_YIELD else 0.08
     inc = val * est_yield / 12
 
@@ -99,14 +115,13 @@ for etf in ETF_LIST:
 df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income"])
 
 # ==================================================
-# ETF CRASH RISK ENGINE (OPTION B)
+# ETF-LEVEL RISK ENGINE (NO CRASH)
 # ==================================================
 
 st.markdown("## 🚨 Risk & Rotation Alerts (ETF Level)")
 
 alerts_found = False
 
-# growth allocation weights
 growth_weights = {
     "SPYI":0.20,"JEPQ":0.20,"ARCC":0.15,
     "MAIN":0.15,"KGLD":0.10,"VOO":0.20
@@ -115,13 +130,13 @@ growth_weights = {
 for etf in HIGH_YIELD:
 
     hist = get_price_history(etf)
-    if hist is None or len(hist) < 15:
+    if hist is None:
         continue
 
-    high30 = hist["Close"].max()
-    last = hist["Close"].iloc[-1]
+    high30 = safe_30d_high(hist)
+    last = safe_last_price(hist)
 
-    if high30 <= 0:
+    if high30 is None or last is None:
         continue
 
     drop = (last - high30) / high30
@@ -135,8 +150,6 @@ for etf in HIGH_YIELD:
     else:
         continue
 
-    alerts_found = True
-
     row = df[df["ETF"] == etf]
     if row.empty:
         continue
@@ -144,19 +157,24 @@ for etf in HIGH_YIELD:
     val = float(row["Value"].iloc[0])
     sell_amt = val * pct
 
+    alerts_found = True
+
     st.error(f"{level}: {etf} down {drop*100:.1f}% from 30-day high")
     st.write(f"👉 Rotate {pct*100:.0f}% (~${sell_amt:,.0f}) from **{etf}** into:")
 
     for tgt, w in growth_weights.items():
-        tgt_hist = get_price_history(tgt)
-        if tgt_hist is None:
+        h2 = get_price_history(tgt)
+        if h2 is None:
             continue
 
-        price = tgt_hist["Close"].iloc[-1]
-        amt = sell_amt * w
-        sh = amt / price if price > 0 else 0
+        p2 = safe_last_price(h2)
+        if p2 is None:
+            continue
 
-        st.write(f"• {tgt}: ${amt:,.0f} (~{sh:.1f} shares)")
+        amt = sell_amt * w
+        sh_est = amt / p2 if p2 > 0 else 0
+
+        st.write(f"• {tgt}: ${amt:,.0f} (~{sh_est:.1f} shares)")
 
     st.markdown("---")
 
