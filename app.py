@@ -19,22 +19,34 @@ if "etfs" not in st.session_state:
     ]
 
 # ==================================================
-# SAFE DATA
+# SAFE MARKET DATA
 # ==================================================
 
 @st.cache_data(ttl=900)
-def get_price(ticker):
+def safe_price(ticker):
     try:
         d = yf.download(ticker, period="5d", interval="1d", progress=False)
         if d is None or len(d) == 0:
             return None
-        return float(d["Close"].iloc[-1])
+        v = d["Close"].iloc[-1]
+        return float(v)
     except:
         return None
 
 
 @st.cache_data(ttl=900)
-def get_market_drop():
+def safe_hist(ticker):
+    try:
+        d = yf.download(ticker, period="2mo", interval="1d", progress=False)
+        if d is None or len(d) < 15:
+            return None
+        return d
+    except:
+        return None
+
+
+@st.cache_data(ttl=900)
+def safe_market_drop():
     try:
         d = yf.download("QQQ", period="3mo", interval="1d", progress=False)
         if d is None or len(d) < 20:
@@ -47,30 +59,19 @@ def get_market_drop():
     except:
         return None
 
-
-@st.cache_data(ttl=900)
-def get_hist(ticker):
-    try:
-        d = yf.download(ticker, period="2mo", interval="1d", progress=False)
-        if d is None or len(d) < 10:
-            return None
-        return d
-    except:
-        return None
-
 # ==================================================
-# PORTFOLIO
+# PORTFOLIO CALC
 # ==================================================
 
 YIELD_EST = {"QDTE": 0.42, "CHPY": 0.41, "XDTE": 0.36}
 
 rows = []
-total_value = 0
-total_monthly_income = 0
+total_value = 0.0
+total_monthly_income = 0.0
 
 for e in st.session_state.etfs:
-    price = get_price(e["ETF"])
-    if price is None:
+    price = safe_price(e["ETF"])
+    if not isinstance(price, (int, float)):
         continue
 
     value = price * e["Shares"]
@@ -92,14 +93,14 @@ for e in st.session_state.etfs:
 df = pd.DataFrame(rows)
 
 # ==================================================
-# 🔝 MARKET STATUS
+# 🚨 MARKET STATUS (TOP OF APP)
 # ==================================================
 
 st.markdown("## 🚨 Market & Rotation Status")
 
-drop = get_market_drop()
+drop = safe_market_drop()
 
-if drop is None:
+if not isinstance(drop, (int, float)):
     st.info("⚪ Market data unavailable — crash detection paused.")
     market_mode = "UNKNOWN"
 elif drop <= -0.20:
@@ -121,13 +122,16 @@ st.markdown("## ⚠ ETF Risk & Payout Stability")
 alerts = []
 
 for e in st.session_state.etfs:
-    h = get_hist(e["ETF"])
+    h = safe_hist(e["ETF"])
     if h is None:
         continue
 
-    last = float(h["Close"].iloc[-1])
-    high30 = float(h["Close"].rolling(30).max().iloc[-1])
-    ma30 = float(h["Close"].rolling(30).mean().iloc[-1])
+    last = h["Close"].iloc[-1]
+    high30 = h["Close"].rolling(30).max().iloc[-1]
+    ma30 = h["Close"].rolling(30).mean().iloc[-1]
+
+    if not all(isinstance(x, (int, float)) for x in [last, high30, ma30]):
+        continue
 
     if high30 > 0:
         drop30 = (last - high30) / high30
@@ -146,7 +150,7 @@ else:
     st.success("No ETF payout risk detected.")
 
 # ==================================================
-# 📆 WEEKLY ACTION PLAN
+# 📆 WEEKLY ACTION PLAN (SAFE)
 # ==================================================
 
 st.markdown("## 📆 Weekly Action Plan")
@@ -154,14 +158,17 @@ st.markdown("## 📆 Weekly Action Plan")
 scores = []
 
 for e in st.session_state.etfs:
-    h = get_hist(e["ETF"])
+    h = safe_hist(e["ETF"])
     if h is None:
+        continue
+
+    if len(h) < 31:
         continue
 
     ret30 = h["Close"].pct_change(30).iloc[-1]
     vol = h["Close"].pct_change().std()
 
-    if pd.isna(ret30) or pd.isna(vol):
+    if not isinstance(ret30, (int, float)) or not isinstance(vol, (int, float)):
         continue
 
     scores.append((e["ETF"], ret30 - vol))
