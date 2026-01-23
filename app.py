@@ -8,9 +8,9 @@ from datetime import datetime
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.2.3", layout="centered")
-st.title("🔥 Income Strategy Engine v3.2.3")
-st.caption("Yield-driven income • risk alerts • rotation guidance")
+st.set_page_config(page_title="Income Engine v3.2.4", layout="centered")
+st.title("🔥 Income Strategy Engine v3.2.4")
+st.caption("Yield-driven income • crash alerts • rotation guidance")
 
 # ==================================================
 # SETTINGS
@@ -66,7 +66,7 @@ st.markdown("## 🧾 Total Contributions So Far")
 total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000, 10000, 500)
 
 # ==================================================
-# DATA HELPERS (SAFE)
+# SAFE DATA HELPERS
 # ==================================================
 
 @st.cache_data(ttl=600)
@@ -102,7 +102,8 @@ def get_volatility(ticker):
         d = yf.download(ticker, period="60d", interval="1d", progress=False)
         if d is None or len(d) < 20:
             return np.nan
-        return float(d["Close"].pct_change().std())
+        v = d["Close"].pct_change().std()
+        return float(v) if np.isfinite(v) else np.nan
     except:
         return np.nan
 
@@ -182,7 +183,7 @@ disp["Volatility"] = disp["Volatility"].apply(lambda x: f"{x:.3f}" if pd.notna(x
 st.dataframe(disp, use_container_width=True)
 
 # ==================================================
-# 🚨 RISK & ROTATION ALERTS (SAFE LOGIC)
+# 🚨 RISK & ROTATION ALERTS (CRASH SAFE)
 # ==================================================
 
 st.markdown("## 🚨 Risk & Rotation Alerts")
@@ -192,19 +193,22 @@ risk_score = 0
 
 qqq_hist = get_price_history("QQQ")
 
-if qqq_hist is not None and len(qqq_hist) >= 21:
+if qqq_hist is not None and len(qqq_hist) >= 25:
     monthly_ret = qqq_hist["Close"].pct_change(21).iloc[-1]
 
-    if monthly_ret < -0.12:
-        risk_score += 2
-        alerts.append(f"🔴 QQQ down {monthly_ret*100:.1f}% in last month")
-    elif monthly_ret < -0.08:
-        risk_score += 1
-        alerts.append(f"🟠 QQQ down {monthly_ret*100:.1f}% in last month")
+    if pd.notna(monthly_ret):
+        if monthly_ret < -0.12:
+            risk_score += 2
+            alerts.append(f"🔴 QQQ down {monthly_ret*100:.1f}% in last month")
+        elif monthly_ret < -0.08:
+            risk_score += 1
+            alerts.append(f"🟠 QQQ down {monthly_ret*100:.1f}% in last month")
+        else:
+            alerts.append("🟢 Market trend stable")
     else:
-        alerts.append("🟢 Market trend stable")
+        alerts.append("⚪ Market trend unclear")
 else:
-    alerts.append("⚪ Market trend data unavailable")
+    alerts.append("⚪ Market data unavailable")
 
 if total_value > 0:
     hy_pct = high_yield_value / total_value
@@ -252,7 +256,7 @@ for w in etf_warnings:
     st.write(w)
 
 if etf_warnings:
-    st.info("Suggested rotation targets: " + ", ".join(GROWTH_ETFS))
+    st.info("Suggested growth targets: " + ", ".join(GROWTH_ETFS))
 
 # ==================================================
 # 🎯 TIERED INCOME SIMULATOR
