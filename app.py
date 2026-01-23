@@ -2,26 +2,55 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-
-st.set_page_config(page_title="Income Strategy Engine", layout="centered")
+import json
+from datetime import datetime
 
 # ==================================================
-# SESSION STATE
+# PAGE
+# ==================================================
+
+st.set_page_config(page_title="Income Strategy Engine", layout="centered")
+st.title("🔥 Income Strategy Engine — Weekly Income Build Phase")
+st.caption("Focused on QDTE • CHPY • XDTE until $1k/month, then expand")
+
+# ==================================================
+# SESSION STATE (START WITH 3 WEEKLY ETFs)
 # ==================================================
 
 if "etfs" not in st.session_state:
     st.session_state.etfs = [
-        {"ETF":"QDTE","Shares":110,"Type":"Income"},
-        {"ETF":"XDTE","Shares":69,"Type":"Income"},
-        {"ETF":"CHPY","Shares":55,"Type":"Income"},
-        {"ETF":"AIPI","Shares":14,"Type":"Income"},
-        {"ETF":"SPYI","Shares":0,"Type":"Growth"},
-        {"ETF":"JEPQ","Shares":19,"Type":"Income"},
-        {"ETF":"ARCC","Shares":0,"Type":"Income"},
-        {"ETF":"MAIN","Shares":0,"Type":"Income"},
-        {"ETF":"KGLD","Shares":0,"Type":"Growth"},
-        {"ETF":"VOO","Shares":0,"Type":"Growth"},
+        {"ETF": "QDTE", "Shares": 126, "Type": "Income"},
+        {"ETF": "CHPY", "Shares": 62,  "Type": "Income"},
+        {"ETF": "XDTE", "Shares": 83,  "Type": "Income"},
     ]
+
+# ==================================================
+# SAVE / LOAD PORTFOLIO (PERSIST SETTINGS)
+# ==================================================
+
+def export_portfolio():
+    return json.dumps(st.session_state.etfs, indent=2)
+
+def import_portfolio(json_str):
+    try:
+        st.session_state.etfs = json.loads(json_str)
+        st.rerun()
+    except:
+        st.error("Invalid portfolio file.")
+
+with st.expander("💾 Save / Load Portfolio Settings", expanded=False):
+
+    st.download_button(
+        "⬇ Download Portfolio Settings",
+        export_portfolio(),
+        file_name="portfolio_settings.json",
+        mime="application/json"
+    )
+
+    uploaded = st.file_uploader("Upload Portfolio Settings", type=["json"])
+    if uploaded is not None:
+        content = uploaded.read().decode("utf-8")
+        import_portfolio(content)
 
 # ==================================================
 # HELPERS
@@ -30,22 +59,23 @@ if "etfs" not in st.session_state:
 @st.cache_data(ttl=900)
 def get_price(ticker):
     try:
-        data = yf.download(ticker, period="5d", interval="1d", progress=False)
-        if len(data) == 0:
+        d = yf.download(ticker, period="5d", interval="1d", progress=False)
+        if d is None or len(d) == 0:
             return None
-        return float(data["Close"].iloc[-1])
+        p = float(d["Close"].iloc[-1])
+        return p if np.isfinite(p) else None
     except:
         return None
 
 @st.cache_data(ttl=900)
 def get_market_drop():
     try:
-        data = yf.download("^GSPC", period="1mo", interval="1d", progress=False)
-        if len(data) < 5:
+        d = yf.download("QQQ", period="3mo", interval="1d", progress=False)
+        if d is None or len(d) < 20:
             return None
-        high = float(data["Close"].max())
-        last = float(data["Close"].iloc[-1])
-        if high == 0:
+        high = float(d["Close"].max())
+        last = float(d["Close"].iloc[-1])
+        if not np.isfinite(high) or not np.isfinite(last) or high == 0:
             return None
         return (last - high) / high
     except:
@@ -57,31 +87,40 @@ def get_market_drop():
 
 rows = []
 total_value = 0
-total_income = 0
+total_monthly_income = 0
+
+# conservative yield estimates (editable later)
+YIELD_EST = {
+    "QDTE": 0.42,
+    "CHPY": 0.41,
+    "XDTE": 0.36
+}
 
 for e in st.session_state.etfs:
     price = get_price(e["ETF"])
-    value = (price or 0) * e["Shares"]
+    if price is None:
+        continue
 
-    # placeholder yield model (safe)
-    monthly_income = value * 0.01 if e["Type"]=="Income" else 0
+    value = price * e["Shares"]
+    y = YIELD_EST.get(e["ETF"], 0.10 if e["Type"] == "Income" else 0.00)
+    monthly_income = value * y / 12
 
     total_value += value
-    total_income += monthly_income
+    total_monthly_income += monthly_income
 
     rows.append({
         "ETF": e["ETF"],
         "Shares": e["Shares"],
-        "Price": round(price,2) if price else None,
-        "Value": round(value,2),
-        "Monthly Income": round(monthly_income,2),
+        "Price": price,
+        "Value": value,
+        "Monthly Income": monthly_income,
         "Type": e["Type"]
     })
 
 df = pd.DataFrame(rows)
 
 # ==================================================
-# 🚨 TOP WARNING / ROTATION STATUS (ALWAYS SAFE)
+# 🔝 TOP WARNING + ROTATION STATUS
 # ==================================================
 
 st.markdown("## 🚨 Market & Rotation Status")
@@ -91,69 +130,61 @@ rotation_msgs = []
 
 if drop is None or not np.isfinite(drop):
     st.info("⚪ Market data unavailable — crash detection paused.")
-
+    market_mode = "UNKNOWN"
 else:
     if drop <= -0.20:
-        st.error("🔴 CRASH MODE — rotate INTO growth ETFs from income.")
-        mode = "CRASH"
+        st.error("🔴 CRASH MODE — rotate some income into future Growth ETFs.")
+        market_mode = "CRASH"
     elif drop <= -0.10:
-        st.warning("🟡 DOWNTREND — reduce weakest income ETFs.")
-        mode = "DOWN"
+        st.warning("🟡 DOWNTREND — slow income buying, prepare to add growth.")
+        market_mode = "DOWN"
     else:
-        st.success("🟢 Market stable — income strategy active.")
-        mode = "NORMAL"
+        st.success("🟢 NORMAL MODE — focus on building income.")
+        market_mode = "NORMAL"
 
-    income = df[df["Type"]=="Income"]
-    growth = df[df["Type"]=="Growth"]
+# ==================================================
+# 📆 WEEKLY ACTION PLAN (ALWAYS VISIBLE)
+# ==================================================
 
-    if mode in ["CRASH","DOWN"] and not income.empty and not growth.empty:
-        weakest = income.sort_values("Monthly Income").head(2)["ETF"].tolist()
-        best_growth = growth.sort_values("Value").head(2)["ETF"].tolist()
-        rotation_msgs.append(
-            f"Move funds from: {', '.join(weakest)} ➜ into: {', '.join(best_growth)}"
-        )
+st.markdown("## 📆 Weekly Action Plan")
 
-    elif mode=="NORMAL" and not income.empty:
-        best = income.sort_values("Monthly Income", ascending=False).head(2)["ETF"].tolist()
-        rotation_msgs.append(f"Reinvest into top income ETFs: {', '.join(best)}")
+if market_mode == "NORMAL":
+    st.success("Reinvest all weekly income into QDTE / CHPY / XDTE (best value).")
 
-if rotation_msgs:
-    for m in rotation_msgs:
-        st.warning("🔁 " + m)
+elif market_mode == "DOWN":
+    st.warning("Start diverting NEW money to Growth ETFs when you add them.")
+
+elif market_mode == "CRASH":
+    st.error("Consider trimming income ETFs and rotating into Growth ETFs.")
+
 else:
-    st.success("✅ No action required this week.")
-
-st.divider()
+    st.info("Market signal unavailable — follow standard reinvestment plan.")
 
 # ==================================================
 # USER INPUTS
 # ==================================================
 
 monthly_add = st.number_input("Monthly cash added ($)", value=200, step=50)
-total_invested = st.number_input("Total invested to date ($)", value=10000, step=500)
+total_invested = st.number_input("Total invested to date ($)", value=11000, step=500)
 
 # ==================================================
-# MANAGE ETFs
+# ➕ MANAGE ETFs (ADD GROWTH LATER)
 # ==================================================
 
 with st.expander("➕ Manage ETFs", expanded=False):
 
-    new_ticker = st.text_input("Add ETF ticker")
-    new_type = st.selectbox("Type", ["Income","Growth"])
+    new_ticker = st.text_input("Add ETF ticker").upper()
+    new_type = st.selectbox("Type", ["Income", "Growth"])
 
     if st.button("Add ETF"):
         if new_ticker:
-            st.session_state.etfs.append({
-                "ETF":new_ticker.upper(),
-                "Shares":0,
-                "Type":new_type
-            })
+            st.session_state.etfs.append({"ETF": new_ticker, "Shares": 0, "Type": new_type})
             st.rerun()
 
     st.markdown("### Current ETFs")
 
-    for i,e in enumerate(list(st.session_state.etfs)):
-        c1,c2,c3,c4 = st.columns([3,3,3,1])
+    for i, e in enumerate(list(st.session_state.etfs)):
+        c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
 
         with c1:
             st.write(e["ETF"])
@@ -165,8 +196,8 @@ with st.expander("➕ Manage ETFs", expanded=False):
 
         with c3:
             st.session_state.etfs[i]["Type"] = st.selectbox(
-                "Type", ["Income","Growth"],
-                index=0 if e["Type"]=="Income" else 1,
+                "Type", ["Income", "Growth"],
+                index=0 if e["Type"] == "Income" else 1,
                 key=f"t{i}"
             )
 
@@ -176,42 +207,89 @@ with st.expander("➕ Manage ETFs", expanded=False):
                 st.rerun()
 
 # ==================================================
-# SNAPSHOT
+# 📊 PORTFOLIO SNAPSHOT
 # ==================================================
 
 with st.expander("📊 Portfolio Snapshot", expanded=True):
 
-    st.metric("Portfolio Value", f"${total_value:,.0f}")
-    st.metric("Monthly Income", f"${total_income:,.0f}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Portfolio Value", f"${total_value:,.0f}")
+    c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
+    c3.metric("Progress to $1k/mo", f"{(total_monthly_income/1000)*100:.1f}%")
 
-    progress = min(total_income/1000,1) if total_income else 0
-    st.progress(progress)
-    st.write(f"Progress to $1k/mo: {progress*100:.1f}%")
+    disp = df.copy()
+    disp["Price"] = disp["Price"].map("${:,.2f}".format)
+    disp["Value"] = disp["Value"].map("${:,.0f}".format)
+    disp["Monthly Income"] = disp["Monthly Income"].map("${:,.0f}".format)
 
-    st.dataframe(df, use_container_width=True)
-
-# ==================================================
-# WEEKLY ACTION PLAN (SAFE)
-# ==================================================
-
-with st.expander("📆 Weekly Action Plan", expanded=True):
-
-    if rotation_msgs:
-        for m in rotation_msgs:
-            st.write("•", m)
-    else:
-        st.write("• Continue normal reinvestment into income ETFs.")
+    st.dataframe(disp, use_container_width=True)
 
 # ==================================================
-# AFTER $1K STRATEGY
+# 🔁 AFTER $1K SIMULATOR
 # ==================================================
 
-with st.expander("🔁 After $1k Strategy Simulator"):
-    st.info("Planned: 50% withdraw, 50% reinvest with growth tilt.")
+with st.expander("🔁 After $1k Strategy Simulator", expanded=False):
+
+    mode = st.selectbox(
+        "After reaching $1k/mo:",
+        ["Reinvest 100%", "Reinvest 50% into Growth", "Withdraw $400/mo"]
+    )
+
+    if total_value > 0 and total_monthly_income > 0:
+
+        avg_yield = total_monthly_income * 12 / total_value
+        proj_value = total_value
+        proj_income = total_monthly_income
+
+        for _ in range(180):
+            if proj_income < 1000:
+                reinv = proj_income
+            else:
+                if mode == "Reinvest 100%":
+                    reinv = proj_income
+                elif mode == "Reinvest 50% into Growth":
+                    reinv = proj_income * 0.5
+                else:
+                    reinv = max(0, proj_income - 400)
+
+            proj_value += monthly_add + reinv
+            proj_income = proj_value * avg_yield / 12
+
+        st.metric("Projected Income After 15y", f"${proj_income:,.0f}/mo")
+        st.metric("Projected Portfolio After 15y", f"${proj_value:,.0f}")
 
 # ==================================================
-# TRUE RETURN TRACKING
+# 🧾 TRUE RETURNS
 # ==================================================
 
-with st.expander("📈 True Return Tracking"):
-    st.info("Snapshot-based return tracking coming next.")
+with st.expander("🧾 True Return Tracking", expanded=False):
+
+    next_12mo = total_monthly_income * 12
+    gain = total_value + next_12mo - total_invested
+    roi = gain / total_invested if total_invested > 0 else 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Contributions", f"${total_invested:,.0f}")
+    c2.metric("Next 12mo Income", f"${next_12mo:,.0f}")
+    c3.metric("True ROI", f"{roi*100:.1f}%")
+
+# ==================================================
+# 📤 SAVE SNAPSHOT CSV
+# ==================================================
+
+with st.expander("📤 Save Snapshot", expanded=False):
+
+    export = df.copy()
+    export["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    export["Total Contributions"] = total_invested
+
+    csv = export.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "⬇ Download Snapshot CSV",
+        csv,
+        f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        "text/csv"
+    )
+
+st.caption("Phase 1: Build income with weekly ETFs → Phase 2: Add growth once $1k/month reached.")
