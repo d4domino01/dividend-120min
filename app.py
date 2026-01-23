@@ -3,30 +3,25 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import os
-import glob
+import math
 
 # ==================================================
 # PAGE
 # ==================================================
 
-st.set_page_config(page_title="Income Engine v3.3", layout="centered")
-st.title("🔥 Income Strategy Engine v3.3")
-st.caption("Snapshot risk engine • income optimization • rotation guidance")
+st.set_page_config(page_title="Income Engine v3.4", layout="centered")
+st.title("🔥 Income Strategy Engine v3.4")
+st.caption("ETF crash detection • rotation guidance • income tracking")
 
 # ==================================================
-# SETTINGS
+# ETF GROUPS
 # ==================================================
 
 HIGH_YIELD = ["QDTE", "XDTE", "CHPY", "AIPI"]
 GROWTH = ["SPYI", "JEPQ", "ARCC", "MAIN", "KGLD", "VOO"]
 ETF_LIST = HIGH_YIELD + GROWTH
 
-INCOME_LOOKBACK_MONTHS = 4
 TARGET_MONTHLY_INCOME = 1000
-
-SNAP_DIR = "/tmp/snapshots"
-os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ==================================================
 # USER INPUTS
@@ -37,13 +32,13 @@ st.markdown("## 📥 Your Holdings")
 holdings = {}
 cols = st.columns(len(ETF_LIST))
 default_vals = {
-    "CHPY":55,"QDTE":110,"XDTE":69,"JEPQ":19,"AIPI":14,
+    "CHPY":55,"QDTE":110,"XDTE":69,"AIPI":14,"JEPQ":19,
     "SPYI":0,"ARCC":0,"MAIN":0,"KGLD":0,"VOO":0
 }
 
 for i, etf in enumerate(ETF_LIST):
     with cols[i]:
-        holdings[etf] = st.number_input(f"{etf}", 0, 100000, default_vals.get(etf,0), 1)
+        holdings[etf] = st.number_input(etf, 0, 100000, default_vals.get(etf,0), 1)
 
 st.markdown("## 💰 Monthly Investment")
 monthly_contribution = st.number_input("Monthly cash added ($)", 0, 5000, 200, 50)
@@ -52,41 +47,25 @@ st.markdown("## 🧾 Total Contributions So Far")
 total_contributions = st.number_input("Total invested to date ($)", 0, 1_000_000, 10000, 500)
 
 # ==================================================
-# DATA HELPERS
+# PRICE HELPERS
 # ==================================================
 
 @st.cache_data(ttl=600)
-def get_price(ticker):
+def get_price_history(ticker):
     try:
-        d = yf.download(ticker, period="5d", interval="1d", progress=False)
+        d = yf.download(ticker, period="45d", interval="1d", progress=False)
         if d is None or d.empty:
             return None
-        return float(d["Close"].iloc[-1])
+        return d.dropna()
     except:
         return None
 
 
-@st.cache_data(ttl=3600)
-def get_recent_dividends(ticker, months=4):
+def get_last_price(hist):
     try:
-        divs = yf.Ticker(ticker).dividends
-        if divs is None or divs.empty:
-            return 0.0
-
-        divs.index = pd.to_datetime(divs.index).tz_localize(None)
-        cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
-        recent = divs[divs.index >= cutoff]
-
-        if recent.empty:
-            return 0.0
-
-        total = recent.sum()
-        days = max((recent.index.max() - cutoff).days, 1)
-        monthly_avg = total / days * 30
-        return float(monthly_avg)
+        return float(hist["Close"].iloc[-1])
     except:
-        return 0.0
-
+        return None
 
 # ==================================================
 # PORTFOLIO
@@ -97,14 +76,20 @@ total_value = 0
 total_monthly_income = 0
 
 for etf in ETF_LIST:
-    sh = holdings.get(etf,0)
-    price = get_price(etf)
+    hist = get_price_history(etf)
+    if hist is None:
+        continue
+
+    price = get_last_price(hist)
     if price is None:
         continue
 
+    sh = holdings.get(etf,0)
     val = sh * price
-    m_inc = get_recent_dividends(etf, INCOME_LOOKBACK_MONTHS)
-    inc = sh * m_inc
+
+    # income placeholder (can be upgraded later)
+    est_yield = 0.35 if etf in HIGH_YIELD else 0.08
+    inc = val * est_yield / 12
 
     total_value += val
     total_monthly_income += inc
@@ -114,80 +99,69 @@ for etf in ETF_LIST:
 df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income"])
 
 # ==================================================
-# SNAPSHOT RISK ENGINE
+# ETF CRASH RISK ENGINE (OPTION B)
 # ==================================================
 
-st.markdown("## 🚨 Risk & Rotation Alerts (Snapshot Based)")
+st.markdown("## 🚨 Risk & Rotation Alerts (ETF Level)")
 
-snap_files = sorted(glob.glob(f"{SNAP_DIR}/snapshot_*.csv"))
+alerts_found = False
 
-risk_status = "🟢 NORMAL"
-rotation_msg = "No rotation suggested."
+# growth allocation weights
+growth_weights = {
+    "SPYI":0.20,"JEPQ":0.20,"ARCC":0.15,
+    "MAIN":0.15,"KGLD":0.10,"VOO":0.20
+}
 
-if len(snap_files) >= 1:
-    prev = pd.read_csv(snap_files[-1])
-    prev_total = prev["Value"].sum()
-    curr_total = df["Value"].sum()
+for etf in HIGH_YIELD:
 
-    if prev_total > 0:
-        drawdown = (curr_total - prev_total) / prev_total
+    hist = get_price_history(etf)
+    if hist is None or len(hist) < 15:
+        continue
 
-        if drawdown <= -0.15:
-            risk_status = "🔴 ROTATE — market stress"
-            rotate_pct = 0.20
-        elif drawdown <= -0.08:
-            risk_status = "🟡 CAUTION — defensive rotation"
-            rotate_pct = 0.10
-        else:
-            rotate_pct = 0.0
+    high30 = hist["Close"].max()
+    last = hist["Close"].iloc[-1]
 
-        if rotate_pct > 0:
-            hy = df[df["ETF"].isin(HIGH_YIELD)]
-            if not hy.empty:
-                worst = hy.sort_values("Value").iloc[0]
-                sell_amt = worst["Value"] * rotate_pct
+    if high30 <= 0:
+        continue
 
-                weights = {
-                    "SPYI":0.20,"JEPQ":0.20,"ARCC":0.15,
-                    "MAIN":0.15,"KGLD":0.10,"VOO":0.20
-                }
+    drop = (last - high30) / high30
 
-                buys = []
-                for etf,w in weights.items():
-                    price = get_price(etf)
-                    if price:
-                        amt = sell_amt * w
-                        sh = amt / price
-                        buys.append(f"{etf}: ${amt:,.0f} (~{sh:.1f} sh)")
+    if drop <= -0.15:
+        level = "🔴 ROTATE"
+        pct = 0.20
+    elif drop <= -0.08:
+        level = "🟡 CAUTION"
+        pct = 0.10
+    else:
+        continue
 
-                rotation_msg = (
-                    f"Sell {rotate_pct*100:.0f}% of {worst['ETF']} "
-                    f"(~${sell_amt:,.0f}) → buy:\n" + "\n".join(buys)
-                )
+    alerts_found = True
 
-else:
-    risk_status = "⚪ No snapshot history yet — save at least one snapshot."
+    row = df[df["ETF"] == etf]
+    if row.empty:
+        continue
 
-st.info(risk_status)
-st.write(rotation_msg)
+    val = float(row["Value"].iloc[0])
+    sell_amt = val * pct
 
-# ==================================================
-# SNAPSHOT SAVE
-# ==================================================
+    st.error(f"{level}: {etf} down {drop*100:.1f}% from 30-day high")
+    st.write(f"👉 Rotate {pct*100:.0f}% (~${sell_amt:,.0f}) from **{etf}** into:")
 
-st.markdown("## 📤 Save Snapshot")
+    for tgt, w in growth_weights.items():
+        tgt_hist = get_price_history(tgt)
+        if tgt_hist is None:
+            continue
 
-export = df.copy()
-export["Snapshot Time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-export["Total Contributions"] = total_contributions
+        price = tgt_hist["Close"].iloc[-1]
+        amt = sell_amt * w
+        sh = amt / price if price > 0 else 0
 
-csv = export.to_csv(index=False).encode("utf-8")
+        st.write(f"• {tgt}: ${amt:,.0f} (~{sh:.1f} shares)")
 
-fname = f"{SNAP_DIR}/snapshot_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-with open(fname, "wb") as f:
-    f.write(csv)
+    st.markdown("---")
 
-st.download_button("⬇ Download CSV", csv, os.path.basename(fname), "text/csv")
+if not alerts_found:
+    st.success("🟢 No crash signals in income ETFs — stay aggressive on income.")
 
 # ==================================================
 # PORTFOLIO SNAPSHOT
@@ -197,7 +171,7 @@ st.markdown("## 📊 Portfolio Snapshot")
 
 c1,c2,c3 = st.columns(3)
 c1.metric("Portfolio Value", f"${total_value:,.0f}")
-c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
+c2.metric("Est. Monthly Income", f"${total_monthly_income:,.0f}")
 c3.metric("Progress to $1k/mo", f"{total_monthly_income/TARGET_MONTHLY_INCOME*100:.1f}%")
 
 disp = df.copy()
