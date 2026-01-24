@@ -1,31 +1,31 @@
-from fastapi import FastAPI
+import streamlit as st
 import requests
 import json
 from datetime import datetime, timedelta
 
-app = FastAPI()
+st.set_page_config(page_title="ETF News Feed", layout="wide")
 
 # -----------------------
 # LOAD ETF HOLDINGS
 # -----------------------
 
-with open("etf_holdings.json") as f:
-    ETF_HOLDINGS = json.load(f)
+ETF_HOLDINGS = {
+    "QDTE": ["AAPL", "MSFT", "NVDA", "AMZN", "META"],
+    "CHPY": ["TSLA", "AMD", "NFLX", "GOOGL"],
+    "XDTE": ["SPY", "QQQ", "IWM"]
+}
 
-# -----------------------
-# CONFIG
-# -----------------------
-
-NEWS_API_KEY = "PUT_YOUR_NEWSAPI_KEY_HERE"
+NEWS_API_KEY = st.secrets["NEWS_API_KEY"] if "NEWS_API_KEY" in st.secrets else "PUT_KEY_HERE"
 
 NEGATIVE_WORDS = ["miss", "lawsuit", "drop", "cut", "warning", "loss", "fall", "decline"]
 POSITIVE_WORDS = ["beat", "record", "growth", "strong", "surge", "profit", "up"]
+
 
 # -----------------------
 # HELPERS
 # -----------------------
 
-def score_headline(text: str) -> int:
+def score_headline(text):
     t = text.lower()
     score = 0
     for w in POSITIVE_WORDS:
@@ -37,17 +37,15 @@ def score_headline(text: str) -> int:
     return score
 
 
-def get_stock_news(ticker: str):
+@st.cache_data(ttl=1800)
+def get_stock_news(ticker):
     from_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
 
     url = (
         "https://newsapi.org/v2/everything?"
         f"q={ticker}&"
-        "sortBy=publishedAt&"
-        "language=en&"
-        "pageSize=5&"
-        f"from={from_date}&"
-        f"apiKey={NEWS_API_KEY}"
+        "sortBy=publishedAt&language=en&pageSize=5&"
+        f"from={from_date}&apiKey={NEWS_API_KEY}"
     )
 
     r = requests.get(url, timeout=10)
@@ -58,8 +56,7 @@ def get_stock_news(ticker: str):
         articles.append({
             "title": a["title"],
             "source": a["source"]["name"],
-            "url": a["url"],
-            "published": a["publishedAt"]
+            "url": a["url"]
         })
 
     return articles
@@ -68,17 +65,14 @@ def get_stock_news(ticker: str):
 def summarize_sentiment(stock_news):
     score = 0
     count = 0
-
     for s in stock_news:
-        for a in s["news"]:
+        for a in s:
             score += score_headline(a["title"])
             count += 1
 
     if count == 0:
         return "neutral"
-
     avg = score / count
-
     if avg > 0.3:
         return "positive"
     elif avg < -0.3:
@@ -88,34 +82,30 @@ def summarize_sentiment(stock_news):
 
 
 # -----------------------
-# API ENDPOINT
+# UI
 # -----------------------
 
-@app.get("/etf-news/{etf}")
-def get_etf_news(etf: str):
+st.title("📊 ETF News Feed (Underlying Stocks)")
 
-    etf = etf.upper()
-    holdings = ETF_HOLDINGS.get(etf)
+for etf, holdings in ETF_HOLDINGS.items():
+    with st.expander(etf, expanded=False):
 
-    if not holdings:
-        return {"error": "ETF not found"}
+        stock_news = []
 
-    stocks_with_news = []
+        for t in holdings:
+            news = get_stock_news(t)
+            if news:
+                stock_news.append(news)
 
-    for ticker in holdings:
-        news = get_stock_news(ticker)
+        sentiment = summarize_sentiment(stock_news)
 
-        if news:
-            stocks_with_news.append({
-                "ticker": ticker,
-                "news": news
-            })
+        st.markdown(f"**Sentiment:** `{sentiment.upper()}`")
 
-    sentiment = summarize_sentiment(stocks_with_news)
-
-    return {
-        "etf": etf,
-        "sentiment": sentiment,
-        "updated": datetime.now().isoformat(),
-        "stocks": stocks_with_news
-    }
+        for ticker in holdings:
+            news = get_stock_news(ticker)
+            if news:
+                st.subheader(ticker)
+                for a in news:
+                    st.markdown(f"- [{a['title']}]({a['url']}) — *{a['source']}*")
+            else:
+                st.caption(f"{ticker}: No recent headlines.")
