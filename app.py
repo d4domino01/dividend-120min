@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import yfinance as yf
 
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
@@ -25,12 +26,16 @@ if "invested" not in st.session_state:
 if "snapshots" not in st.session_state:
     st.session_state.snapshots = []
 
+# 💰 CASH WALLET
+if "cash_wallet" not in st.session_state:
+    st.session_state.cash_wallet = 0.0
+
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v5.4")
-st.caption("Income focus • reinvest optimization • no forced selling")
+st.title("🔥 Income Strategy Engine v5.5")
+st.caption("Income focus • cash wallet compounding • whole shares only")
 
 # -------------------- TOP STATUS PANEL --------------------
-st.success("🟢 Strategy Mode: Income-Max (single ETF focus)")
+st.success("🟢 Strategy Mode: Income-Max + Cash Wallet Enabled")
 
 # -------------------- USER INPUTS --------------------
 st.session_state.monthly_add = st.number_input(
@@ -42,7 +47,7 @@ st.session_state.invested = st.number_input(
 )
 
 # =========================================================
-# MANAGE ETFS
+# MANAGE ETFs
 # =========================================================
 with st.expander("➕ Manage ETFs"):
 
@@ -100,28 +105,22 @@ with st.expander("📊 Portfolio Snapshot"):
     st.success(f"💸 Monthly Income: ${monthly_income:,.2f}")
 
 # =========================================================
-# ETF RISK & PAYOUT STABILITY (SAFE MODE)
-# =========================================================
-with st.expander("⚠️ ETF Risk & Payout Stability"):
-
-    for t, d in st.session_state.etfs.items():
-        if d["type"] == "Income":
-            st.info(f"{t}: Market analysis paused (safe mode)")
-
-# =========================================================
 # WEEKLY ACTION PLAN
 # =========================================================
 with st.expander("📅 Weekly Action Plan"):
 
     weekly_cash = st.session_state.monthly_add / 4
-    st.write(f"Weekly cash available: **${weekly_cash:,.2f}**")
+
+    st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
+    st.write(f"Cash wallet balance: **${st.session_state.cash_wallet:,.2f}**")
 
     st.write("Strategy:")
-    st.write("- Focus all new money into highest yield ETF")
+    st.write("- Add weekly cash to wallet")
+    st.write("- Buy highest yield ETF when enough for whole shares")
     st.write("- No selling during income build phase")
 
 # =========================================================
-# WEEKLY REINVESTMENT OPTIMIZER — SINGLE ETF
+# WEEKLY REINVESTMENT OPTIMIZER — CASH WALLET
 # =========================================================
 with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
 
@@ -131,25 +130,46 @@ with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
         st.warning("No income ETFs selected.")
     else:
         weekly_cash = st.session_state.monthly_add / 4
+        st.session_state.cash_wallet += weekly_cash
 
-        # pick highest yield ETF
         best_ticker = max(income_etfs, key=lambda x: income_etfs[x]["yield"])
         best = income_etfs[best_ticker]
 
-        shares = int(weekly_cash // best["price"])
+        shares = int(st.session_state.cash_wallet // best["price"])
         cost = shares * best["price"]
-        remaining = weekly_cash - cost
 
-        st.write("### 🎯 Income-Max Strategy (single ETF)")
+        st.write("### 🎯 Income-Max Strategy (Cash Wallet)")
 
         st.success(f"Best yield ETF: **{best_ticker}** ({best['yield']*100:.1f}%)")
 
         if shares > 0:
             st.success(f"Buy **{shares} shares** → ${cost:,.2f}")
+            if st.button("✅ Execute Buy"):
+                st.session_state.etfs[best_ticker]["shares"] += shares
+                st.session_state.cash_wallet -= cost
+                st.success("Purchase recorded.")
+                st.rerun()
         else:
-            st.warning("Not enough weekly cash to buy 1 share yet.")
+            st.info("Not enough wallet cash yet to buy 1 share.")
 
-        st.write(f"💵 Cash left over: **${remaining:,.2f}**")
+        st.write(f"💵 Wallet balance after buy: **${st.session_state.cash_wallet:,.2f}**")
+
+# =========================================================
+# ETF NEWS FEED (SAFE)
+# =========================================================
+with st.expander("📰 ETF News Feed"):
+
+    for t in st.session_state.etfs:
+        st.markdown(f"### {t}")
+        try:
+            news = yf.Ticker(t).news
+            if not news:
+                st.info("No recent headlines.")
+            else:
+                for n in news[:5]:
+                    st.write("•", n.get("title", "No title"))
+        except:
+            st.info("News unavailable.")
 
 # =========================================================
 # AFTER $1K STRATEGY SIMULATOR
@@ -159,7 +179,6 @@ with st.expander("🔁 After $1k Strategy Simulator"):
     st.write("When monthly income reaches $1,000:")
     st.write("- 50% reinvest into income ETFs")
     st.write("- 50% shift to growth ETFs")
-
     st.info("Growth phase not yet active — income target not reached.")
 
 # =========================================================
@@ -172,6 +191,7 @@ with st.expander("📈 True Return Tracking"):
             "date": datetime.now().strftime("%Y-%m-%d"),
             "invested": st.session_state.invested,
             "portfolio_value": sum(d["shares"] * d["price"] for d in st.session_state.etfs.values()),
+            "wallet": round(st.session_state.cash_wallet, 2),
         })
 
     if st.session_state.snapshots:
@@ -181,4 +201,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("Stable income compounding engine — built for long-term cashflow.")
+st.caption("Stable income compounding engine — whole shares • cash wallet • news awareness.")
