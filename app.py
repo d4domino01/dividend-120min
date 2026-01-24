@@ -36,7 +36,7 @@ def get_history(ticker):
     except:
         return None
 
-# ---------------- RISK ENGINE (SAFE) ----------------
+# ---------------- SAFE RISK ENGINE ----------------
 def analyze_risk(ticker):
     df = get_history(ticker)
     if df is None:
@@ -46,21 +46,29 @@ def analyze_risk(ticker):
     if len(close) < 15:
         return "Data unavailable", "none"
 
-    try:
-        last = float(close.iloc[-1])
-        ma20 = float(close.rolling(20).mean().iloc[-1])
-        high30 = float(close.tail(30).max())
-    except:
+    last = close.iloc[-1]
+
+    if not np.isfinite(last):
         return "Data unavailable", "none"
 
-    if not np.isfinite(last) or not np.isfinite(high30) or high30 <= 0:
+    # MA20
+    if len(close) >= 20:
+        ma20 = close.rolling(20).mean().iloc[-1]
+        if not np.isfinite(ma20):
+            ma20 = None
+    else:
+        ma20 = None
+
+    # 30 day high
+    high30 = close.tail(30).max()
+    if not np.isfinite(high30) or high30 <= 0:
         return "Data unavailable", "none"
 
     drop30 = (last - high30) / high30
 
     if drop30 <= -0.20:
         return "High drawdown risk", "reduce"
-    elif last < ma20:
+    elif ma20 is not None and last < ma20:
         return "Weak trend", "hold"
     else:
         return "Stable", "add"
