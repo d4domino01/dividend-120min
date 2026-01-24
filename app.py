@@ -3,10 +3,9 @@ import pandas as pd
 from datetime import datetime
 import feedparser
 import yfinance as yf
-import matplotlib.pyplot as plt
 
 # -------------------- CONFIG --------------------
-st.set_page_config(page_title="Income Strategy Engine", layout="wide")
+st.set_page_config(page_title="Dividend Strategy", layout="wide")
 
 # -------------------- DEFAULT DATA --------------------
 DEFAULT_ETFS = {
@@ -43,7 +42,6 @@ if "last_price_signal" not in st.session_state:
 if "last_income_snapshot" not in st.session_state:
     st.session_state.last_income_snapshot = None
 
-# 🆕 drawdown tracking
 if "peak_portfolio_value" not in st.session_state:
     st.session_state.peak_portfolio_value = None
 
@@ -156,7 +154,6 @@ for t, d in st.session_state.etfs.items():
     total_value += value
     monthly_income += income
 
-# 🆕 update peak portfolio value
 if st.session_state.peak_portfolio_value is None:
     st.session_state.peak_portfolio_value = total_value
 else:
@@ -179,18 +176,18 @@ if st.session_state.last_income_snapshot:
     )
 
 # -------------------- HEADER --------------------
-st.markdown("## 🔥 Dividend Strategy")
+st.markdown("## 💰 Dividend Strategy")
 
-# -------------------- KPI CARDS --------------------
-c1, c2, c3, c4 = st.columns(4)
+# -------------------- KPI + GOAL BAR --------------------
+c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1.2, 1.2, 0.6])
 
-c1.metric("💼 Portfolio Value", f"${total_value:,.0f}")
-c2.metric("💸 Monthly Income", f"${monthly_income:,.2f}")
+c1.metric("💼 Portfolio", f"${total_value:,.0f}")
+c2.metric("💸 Monthly", f"${monthly_income:,.2f}")
 
 if income_change_pct is not None:
-    c3.metric("📉 Income Change", f"{income_change_pct:.1f}%", delta=f"{income_change_pct:.1f}%")
+    c3.metric("📉 Change", f"{income_change_pct:.1f}%", delta=f"{income_change_pct:.1f}%")
 else:
-    c3.metric("📉 Income Change", "—")
+    c3.metric("📉 Change", "—")
 
 status = "HEALTHY"
 if drawdown_pct <= -15:
@@ -202,39 +199,20 @@ elif any("🔴" in v for v in signals.values()):
 elif any("🟠" in v for v in signals.values()):
     status = "CAUTION"
 
-c4.metric("🛡 Strategy Status", status)
-
-# =========================================================
-# 🎯 MONTHLY INCOME TARGET PROGRESS ($1000 GOAL)
-# =========================================================
-st.subheader("🎯 Income Target Progress")
+c4.metric("🛡 Status", status)
 
 goal = 1000
-progress = min(monthly_income, goal)
-remaining = max(goal - monthly_income, 0)
+progress_ratio = min(monthly_income / goal, 1.0)
 
-fig, ax = plt.subplots(figsize=(4, 4))
+bar_df = pd.DataFrame({"$1k Goal": [progress_ratio]})
 
-ax.pie(
-    [progress, remaining],
-    startangle=90,
-    wedgeprops=dict(width=0.4),
-)
-
-ax.text(
-    0, 0,
-    f"${monthly_income:.0f}\n/ $1000",
-    ha="center",
-    va="center",
-    fontsize=14,
-    fontweight="bold"
-)
-
-ax.set_aspect("equal")
-st.pyplot(fig)
+with c5:
+    st.caption("🎯 Goal")
+    st.bar_chart(bar_df, height=180)
+    st.caption(f"{int(progress_ratio * 100)}%")
 
 # =========================================================
-# 📊 MAIN DASHBOARD
+# 📊 STRATEGY MONITOR
 # =========================================================
 st.subheader("📊 Strategy & ETF Monitor")
 
@@ -297,7 +275,7 @@ else:
     st.success("🟢 Drawdown within normal range")
 
 # =========================================================
-# 📈 CHARTS
+# 📈 PERFORMANCE CHARTS
 # =========================================================
 st.subheader("📈 Performance Overview")
 
@@ -317,7 +295,6 @@ else:
 # ⚙️ PORTFOLIO ACTIONS
 # =========================================================
 with st.expander("⚙️ Portfolio Actions"):
-
     weekly_cash = st.session_state.monthly_add / 4
     st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
 
@@ -384,7 +361,6 @@ with st.expander("⚙️ Portfolio Actions"):
 # 🌍 MARKET INTELLIGENCE
 # =========================================================
 with st.expander("🌍 Market Intelligence"):
-
     for label, ticker in {"QQQ (QDTE)": "QQQ", "SPY (XDTE)": "SPY", "SOXX (CHPY)": "SOXX"}.items():
         st.markdown(f"### {label}")
         feed = feedparser.parse(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US")
@@ -399,10 +375,9 @@ with st.expander("🌍 Market Intelligence"):
             st.write("•", e.title)
 
 # =========================================================
-# 📈 TRUE RETURN TRACKING
+# 📈 SNAPSHOT SAVE
 # =========================================================
 with st.expander("📈 Save Portfolio Snapshot"):
-
     if st.button("Save Snapshot"):
         st.session_state.snapshots.append({
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -413,4 +388,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.5 — income + drawdown protection for high-yield ETF strategies.")
+st.caption("v8.6 — income + drawdown protection with goal tracking.")
