@@ -40,28 +40,40 @@ if "payouts" not in st.session_state:
 
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
+
+    # ----- TRY YAHOO MOMENTUM -----
     try:
-        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+        df = yf.download(ticker, period="3mo", interval="1d", progress=False)
 
-        if len(df) < 30:
-            return "UNKNOWN"
+        if len(df) >= 30:
+            df["MA7"] = df["Close"].rolling(7).mean()
+            df["MA30"] = df["Close"].rolling(30).mean()
+            last = df.iloc[-1]
 
-        df["MA7"] = df["Close"].rolling(7).mean()
-        df["MA30"] = df["Close"].rolling(30).mean()
+            if not pd.isna(last["MA7"]) and not pd.isna(last["MA30"]):
+                if last["Close"] > last["MA7"] and last["MA7"] > last["MA30"]:
+                    return "STRONG"
+                elif last["Close"] < last["MA7"] and last["MA7"] < last["MA30"]:
+                    return "WEAK"
+                else:
+                    return "NEUTRAL"
+    except:
+        pass
 
-        last = df.iloc[-1]
+    # ----- FALLBACK USING STORED PRICES -----
+    try:
+        prices = [v["price"] for v in st.session_state.etfs.values()]
+        avg_price = sum(prices) / len(prices)
+        p = st.session_state.etfs[ticker]["price"]
 
-        if pd.isna(last["MA7"]) or pd.isna(last["MA30"]):
-            return "UNKNOWN"
-
-        if last["Close"] > last["MA7"] and last["MA7"] > last["MA30"]:
+        if p > avg_price * 1.05:
             return "STRONG"
-        elif last["Close"] < last["MA7"] and last["MA7"] < last["MA30"]:
+        elif p < avg_price * 0.95:
             return "WEAK"
         else:
             return "NEUTRAL"
     except:
-        return "UNKNOWN"
+        return "NEUTRAL"
 
 
 def payout_signal(ticker):
@@ -121,7 +133,7 @@ else:
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.1")
+st.title("🔥 Income Strategy Engine v7.2")
 st.caption("Income focus • ETF health monitoring • momentum + payout protection")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
