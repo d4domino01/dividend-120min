@@ -179,13 +179,13 @@ if st.session_state.last_income_snapshot:
 st.markdown("## 🔥 Dividend Strategy")
 
 # -------------------- KPI + GOAL ROW --------------------
-c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1, 1, 1.2])
+c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1, 1, 1.4])
 
 c1.metric("💼 Value", f"${total_value:,.0f}")
 c2.metric("💸 Income", f"${monthly_income:,.2f}")
 
 if income_change_pct is not None:
-    c3.metric("📉 Change", f"{income_change_pct:.1f}%", delta=f"{income_change_pct:.1f}%")
+    c3.metric("📉 Change", f"{income_change_pct:.1f}%")
 else:
     c3.metric("📉 Change", "—")
 
@@ -320,7 +320,7 @@ with st.expander("⚙️ Portfolio Actions"):
     if buy_list:
         best = max(buy_list, key=lambda x: st.session_state.etfs[x]["yield"])
         price = st.session_state.etfs[best]["price"]
-        shares = int(st.session_state.cash_wallet //
+        shares = int(st.session_state.cash_wallet // price)
 
         if shares > 0 and st.button("✅ Execute Buy"):
             st.session_state.etfs[best]["shares"] += shares
