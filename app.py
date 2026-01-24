@@ -9,9 +9,9 @@ st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 
 # -------------------- DEFAULT DATA --------------------
 DEFAULT_ETFS = {
-    "QDTE": {"shares": 0, "price": 30.72, "yield": 0.30, "type": "Income"},
-    "CHPY": {"shares": 0, "price": 60.43, "yield": 0.41, "type": "Income"},
-    "XDTE": {"shares": 0, "price": 39.75, "yield": 0.28, "type": "Income"},
+    "QDTE": {"shares": 125, "price": 30.82, "yield": 0.30, "type": "Income"},
+    "CHPY": {"shares": 63, "price": 59.77, "yield": 0.41, "type": "Income"},
+    "XDTE": {"shares": 84, "price": 39.79, "yield": 0.28, "type": "Income"},
 }
 
 # -------------------- SESSION STATE --------------------
