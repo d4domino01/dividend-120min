@@ -1,194 +1,204 @@
 import streamlit as st
-import requests
-from datetime import datetime, timedelta
+import pandas as pd
+from datetime import datetime
+import yfinance as yf
 
-# =====================================================
-# PAGE CONFIG
-# =====================================================
+# -------------------- CONFIG --------------------
+st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 
-st.set_page_config(page_title="Dividend Strategy App", layout="wide")
-
-# =====================================================
-# SESSION STATE
-# =====================================================
-
-if "wallet" not in st.session_state:
-    st.session_state.wallet = 50.0
-
-if "shares" not in st.session_state:
-    st.session_state.shares = {"QDTE": 0, "CHPY": 0, "XDTE": 0}
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-# =====================================================
-# ETF DATA
-# =====================================================
-
-ETF_PRICES = {
-    "QDTE": 45,
-    "CHPY": 38,
-    "XDTE": 52
+# -------------------- DEFAULT DATA --------------------
+DEFAULT_ETFS = {
+    "QDTE": {"shares": 0, "price": 30.72, "yield": 0.30, "type": "Income"},
+    "CHPY": {"shares": 0, "price": 60.43, "yield": 0.41, "type": "Income"},
+    "XDTE": {"shares": 0, "price": 39.75, "yield": 0.28, "type": "Income"},
 }
 
-ETF_HOLDINGS = {
-    "QDTE": ["AAPL", "MSFT", "NVDA", "AMZN", "META"],
-    "CHPY": ["TSLA", "AMD", "NFLX", "GOOGL"],
-    "XDTE": ["SPY", "QQQ", "IWM"]
-}
+# -------------------- SESSION STATE --------------------
+if "etfs" not in st.session_state:
+    st.session_state.etfs = DEFAULT_ETFS.copy()
 
-NEGATIVE_WORDS = ["miss", "lawsuit", "drop", "cut", "warning", "loss", "fall", "decline"]
-POSITIVE_WORDS = ["beat", "record", "growth", "strong", "surge", "profit", "up"]
+if "monthly_add" not in st.session_state:
+    st.session_state.monthly_add = 200
 
-NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")
+if "invested" not in st.session_state:
+    st.session_state.invested = 10000
 
-# =====================================================
-# HELPERS
-# =====================================================
+if "snapshots" not in st.session_state:
+    st.session_state.snapshots = []
 
-def score_headline(text):
-    t = text.lower()
-    score = 0
-    for w in POSITIVE_WORDS:
-        if w in t:
-            score += 1
-    for w in NEGATIVE_WORDS:
-        if w in t:
-            score -= 1
-    return score
+# 💰 CASH WALLET
+if "cash_wallet" not in st.session_state:
+    st.session_state.cash_wallet = 0.0
 
+# -------------------- TITLE --------------------
+st.title("🔥 Income Strategy Engine v5.5")
+st.caption("Income focus • cash wallet compounding • whole shares only")
 
-@st.cache_data(ttl=1800)
-def get_stock_news(ticker):
-    from_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+# -------------------- TOP STATUS PANEL --------------------
+st.success("🟢 Strategy Mode: Income-Max + Cash Wallet Enabled")
 
-    url = (
-        "https://newsapi.org/v2/everything?"
-        f"q={ticker}&sortBy=publishedAt&language=en&pageSize=3&"
-        f"from={from_date}&apiKey={NEWS_API_KEY}"
-    )
+# -------------------- USER INPUTS --------------------
+st.session_state.monthly_add = st.number_input(
+    "Monthly cash added ($)", min_value=0, value=st.session_state.monthly_add, step=50
+)
 
-    r = requests.get(url, timeout=10)
-    data = r.json()
+st.session_state.invested = st.number_input(
+    "Total invested to date ($)", min_value=0, value=st.session_state.invested, step=500
+)
 
-    articles = []
-    for a in data.get("articles", []):
-        articles.append({
-            "title": a["title"],
-            "source": a["source"]["name"],
-            "url": a["url"]
-        })
-    return articles
+# =========================================================
+# MANAGE ETFs
+# =========================================================
+with st.expander("➕ Manage ETFs"):
 
+    for t in list(st.session_state.etfs.keys()):
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+        with c1:
+            st.write(f"**{t}**")
+        with c2:
+            st.session_state.etfs[t]["shares"] = st.number_input(
+                f"{t} shares", min_value=0, value=st.session_state.etfs[t]["shares"], key=f"s_{t}"
+            )
+        with c3:
+            st.session_state.etfs[t]["type"] = st.selectbox(
+                "Type", ["Income", "Growth"],
+                index=0 if st.session_state.etfs[t]["type"] == "Income" else 1,
+                key=f"t_{t}"
+            )
+        with c4:
+            if st.button("❌", key=f"d_{t}"):
+                del st.session_state.etfs[t]
+                st.rerun()
 
-# =====================================================
-# HEADER
-# =====================================================
+    st.divider()
+    new_ticker = st.text_input("Add ETF ticker")
+    if st.button("Add ETF"):
+        if new_ticker and new_ticker not in st.session_state.etfs:
+            st.session_state.etfs[new_ticker] = {
+                "shares": 0,
+                "price": 50,
+                "yield": 0.05,
+                "type": "Growth",
+            }
+            st.rerun()
 
-st.title("📈 Dividend Income Strategy App")
+# =========================================================
+# PORTFOLIO SNAPSHOT
+# =========================================================
+with st.expander("📊 Portfolio Snapshot"):
 
-st.metric("💵 Wallet Balance", f"${st.session_state.wallet:,.2f}")
+    rows = []
+    total_value = 0
+    monthly_income = 0
 
-# =====================================================
-# BUY / SELL
-# =====================================================
+    for t, d in st.session_state.etfs.items():
+        value = d["shares"] * d["price"]
+        income = value * d["yield"] / 12
+        total_value += value
+        monthly_income += income
+        rows.append([t, d["shares"], f"${d['price']:.2f}", f"${value:,.0f}", f"${income:,.2f}"])
 
-st.subheader("🛒 Trading Panel")
+    df = pd.DataFrame(rows, columns=["ETF", "Shares", "Price", "Value", "Monthly Income"])
+    st.dataframe(df, use_container_width=True)
 
-cols = st.columns(3)
+    st.success(f"💼 Portfolio Value: ${total_value:,.0f}")
+    st.success(f"💸 Monthly Income: ${monthly_income:,.2f}")
 
-for i, etf in enumerate(ETF_PRICES):
-    with cols[i]:
-        st.markdown(f"### {etf}")
-        st.caption(f"Price: ${ETF_PRICES[etf]}")
-        st.caption(f"Shares: {st.session_state.shares[etf]}")
+# =========================================================
+# WEEKLY ACTION PLAN
+# =========================================================
+with st.expander("📅 Weekly Action Plan"):
 
-        if st.button(f"Buy {etf}", key=f"buy_{etf}"):
-            if st.session_state.wallet >= ETF_PRICES[etf]:
-                st.session_state.wallet -= ETF_PRICES[etf]
-                st.session_state.shares[etf] += 1
-                st.session_state.history.append((datetime.now(), "BUY", etf))
+    weekly_cash = st.session_state.monthly_add / 4
+
+    st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
+    st.write(f"Cash wallet balance: **${st.session_state.cash_wallet:,.2f}**")
+
+    st.write("Strategy:")
+    st.write("- Add weekly cash to wallet")
+    st.write("- Buy highest yield ETF when enough for whole shares")
+    st.write("- No selling during income build phase")
+
+# =========================================================
+# WEEKLY REINVESTMENT OPTIMIZER — CASH WALLET
+# =========================================================
+with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
+
+    income_etfs = {t: d for t, d in st.session_state.etfs.items() if d["type"] == "Income"}
+
+    if not income_etfs:
+        st.warning("No income ETFs selected.")
+    else:
+        weekly_cash = st.session_state.monthly_add / 4
+        st.session_state.cash_wallet += weekly_cash
+
+        best_ticker = max(income_etfs, key=lambda x: income_etfs[x]["yield"])
+        best = income_etfs[best_ticker]
+
+        shares = int(st.session_state.cash_wallet // best["price"])
+        cost = shares * best["price"]
+
+        st.write("### 🎯 Income-Max Strategy (Cash Wallet)")
+
+        st.success(f"Best yield ETF: **{best_ticker}** ({best['yield']*100:.1f}%)")
+
+        if shares > 0:
+            st.success(f"Buy **{shares} shares** → ${cost:,.2f}")
+            if st.button("✅ Execute Buy"):
+                st.session_state.etfs[best_ticker]["shares"] += shares
+                st.session_state.cash_wallet -= cost
+                st.success("Purchase recorded.")
+                st.rerun()
+        else:
+            st.info("Not enough wallet cash yet to buy 1 share.")
+
+        st.write(f"💵 Wallet balance after buy: **${st.session_state.cash_wallet:,.2f}**")
+
+# =========================================================
+# ETF NEWS FEED (SAFE)
+# =========================================================
+with st.expander("📰 ETF News Feed"):
+
+    for t in st.session_state.etfs:
+        st.markdown(f"### {t}")
+        try:
+            news = yf.Ticker(t).news
+            if not news:
+                st.info("No recent headlines.")
             else:
-                st.warning("Not enough wallet cash yet to buy 1 share.")
+                for n in news[:5]:
+                    st.write("•", n.get("title", "No title"))
+        except:
+            st.info("News unavailable.")
 
-        if st.button(f"Sell {etf}", key=f"sell_{etf}"):
-            if st.session_state.shares[etf] > 0:
-                st.session_state.wallet += ETF_PRICES[etf]
-                st.session_state.shares[etf] -= 1
-                st.session_state.history.append((datetime.now(), "SELL", etf))
-            else:
-                st.warning("No shares to sell.")
-
-# =====================================================
-# ETF NEWS FEED (UNDERLYING STOCKS)
-# =====================================================
-
-st.divider()
-st.subheader("📰 ETF News Feed (Underlying Stocks)")
-
-for etf, holdings in ETF_HOLDINGS.items():
-    with st.expander(etf, expanded=False):
-
-        all_scores = []
-
-        for ticker in holdings:
-            news = get_stock_news(ticker)
-
-            if news:
-                st.markdown(f"### {ticker}")
-                for a in news:
-                    s = score_headline(a["title"])
-                    all_scores.append(s)
-                    st.markdown(f"- [{a['title']}]({a['url']}) — *{a['source']}*")
-            else:
-                st.caption(f"{ticker}: No recent headlines")
-
-        if all_scores:
-            avg = sum(all_scores) / len(all_scores)
-            if avg > 0.3:
-                st.success("Market tone: Positive for income")
-            elif avg < -0.3:
-                st.error("Market tone: Risk of weaker distributions")
-            else:
-                st.info("Market tone: Neutral")
-
-# =====================================================
+# =========================================================
 # AFTER $1K STRATEGY SIMULATOR
-# =====================================================
+# =========================================================
+with st.expander("🔁 After $1k Strategy Simulator"):
 
-st.divider()
-st.subheader("🔁 After $1k Strategy Simulator")
+    st.write("When monthly income reaches $1,000:")
+    st.write("- 50% reinvest into income ETFs")
+    st.write("- 50% shift to growth ETFs")
+    st.info("Growth phase not yet active — income target not reached.")
 
-monthly_div = st.slider("Monthly dividend at $1k level ($)", 500, 1200, 1000)
-withdraw = st.slider("Monthly withdrawal ($)", 0, 800, 400)
-reinvest = monthly_div - withdraw
-
-years = st.slider("Years", 1, 20, 10)
-
-balance = 1000
-growth = []
-
-for y in range(1, years + 1):
-    balance += reinvest * 12
-    growth.append(balance)
-
-st.line_chart(growth)
-st.caption(f"Reinvested per month: ${reinvest}")
-
-# =====================================================
+# =========================================================
 # TRUE RETURN TRACKING
-# =====================================================
+# =========================================================
+with st.expander("📈 True Return Tracking"):
 
-st.divider()
-st.subheader("📊 True Return Tracking")
+    if st.button("Save Snapshot"):
+        st.session_state.snapshots.append({
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "invested": st.session_state.invested,
+            "portfolio_value": sum(d["shares"] * d["price"] for d in st.session_state.etfs.values()),
+            "wallet": round(st.session_state.cash_wallet, 2),
+        })
 
-total_invested = sum(v * ETF_PRICES[k] for k, v in st.session_state.shares.items())
-portfolio_value = total_invested + st.session_state.wallet
+    if st.session_state.snapshots:
+        df = pd.DataFrame(st.session_state.snapshots)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No snapshots saved yet.")
 
-st.metric("Portfolio Value", f"${portfolio_value:,.2f}")
-st.metric("Invested in ETFs", f"${total_invested:,.2f}")
-
-if st.session_state.history:
-    st.markdown("### Trade History")
-    for h in st.session_state.history[-10:]:
-        st.caption(f"{h[0].strftime('%Y-%m-%d %H:%M')} — {h[1]} {h[2]}")
+# -------------------- FOOTER --------------------
+st.caption("Stable income compounding engine — whole shares • cash wallet • news awareness.")
