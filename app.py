@@ -119,11 +119,9 @@ def final_signal(ticker, price_sig, pay_sig, underlying_trend):
 
     last_sig = st.session_state.last_price_signal.get(ticker)
 
-    # confirmed ETF breakdown
     if price_sig == "WEAK" and last_sig == "WEAK":
         return "🔴 REDUCE 33%"
 
-    # early warning if underlying weak
     if underlying_trend == "WEAK" and price_sig != "WEAK":
         return "🟠 PAUSE (Underlying Weak)"
 
@@ -178,8 +176,8 @@ else:
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.9")
-st.caption("Income focus • predictive underlying monitoring • confirmation-based selling")
+st.title("🔥 Income Strategy Engine v8.0")
+st.caption("Income focus • predictive underlying monitoring • strategy-driven news")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
 if level == "success":
@@ -372,13 +370,32 @@ with st.expander("💰 Weekly Reinvestment Optimizer"):
             st.info("Not enough wallet cash yet to buy 1 share.")
 
 # =========================================================
-# ETF NEWS FEED
+# ETF NEWS FEED (UNCHANGED)
 # =========================================================
 with st.expander("📰 ETF News Feed"):
 
     for t in st.session_state.etfs:
         st.markdown(f"### {t}")
         feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={t}&region=US&lang=en-US"
+
+        try:
+            feed = feedparser.parse(feed_url)
+            if not feed.entries:
+                st.info("No recent headlines.")
+            else:
+                for entry in feed.entries[:5]:
+                    st.write("•", entry.title)
+        except:
+            st.info("News unavailable.")
+
+# =========================================================
+# UNDERLYING MARKET NEWS (NEW)
+# =========================================================
+with st.expander("🌍 Underlying Market News"):
+
+    for label, ticker in {"QDTE Driver (QQQ)": "QQQ", "XDTE Driver (SPY)": "SPY", "CHPY Driver (SOXX)": "SOXX"}.items():
+        st.markdown(f"### {label}")
+        feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
 
         try:
             feed = feedparser.parse(feed_url)
@@ -420,4 +437,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — now includes underlying strategy prediction.")
+st.caption("ETF-focused income protection engine — now includes underlying strategy prediction and market news.")
