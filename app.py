@@ -93,19 +93,26 @@ def payout_signal(ticker):
         return "STABLE"
 
 
+# ✅ NEW SMART ACTION LOGIC
 def final_signal(price_sig, pay_sig):
 
-    if pay_sig == "FALLING":
+    # 🔴 Only reduce when BOTH are bad
+    if price_sig == "WEAK" and pay_sig == "FALLING":
         return "🔴 REDUCE"
 
-    if price_sig == "WEAK" and pay_sig != "RISING":
+    # 🟠 Caution when only one is bad
+    if price_sig == "WEAK" and pay_sig != "FALLING":
         return "🟠 PAUSE"
+
+    if price_sig != "WEAK" and pay_sig == "FALLING":
+        return "🟠 PAUSE"
+
+    # 🟢 Positive cases
+    if price_sig == "STRONG":
+        return "🟢 BUY"
 
     if price_sig == "NEUTRAL" and pay_sig == "RISING":
         return "🟢 ADD"
-
-    if price_sig == "STRONG":
-        return "🟢 BUY"
 
     if price_sig == "NEUTRAL":
         return "🟡 HOLD"
@@ -133,8 +140,8 @@ else:
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.2")
-st.caption("Income focus • ETF health monitoring • momentum + payout protection")
+st.title("🔥 Income Strategy Engine v7.3")
+st.caption("Income focus • ETF health monitoring • smart dual-signal protection")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
 if level == "success":
@@ -352,4 +359,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — reacts to price momentum and payout trends.")
+st.caption("ETF-focused income protection engine — reduces only when BOTH price and income weaken.")
