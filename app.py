@@ -41,44 +41,63 @@ if "payouts" not in st.session_state:
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
     try:
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
-        df["MA50"] = df["Close"].rolling(50).mean()
-        df["MA200"] = df["Close"].rolling(200).mean()
+        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+
+        if len(df) < 30:
+            return "UNKNOWN"
+
+        df["MA7"] = df["Close"].rolling(7).mean()
+        df["MA30"] = df["Close"].rolling(30).mean()
+
         last = df.iloc[-1]
 
-        if last["Close"] > last["MA50"] > last["MA200"]:
+        if pd.isna(last["MA7"]) or pd.isna(last["MA30"]):
+            return "UNKNOWN"
+
+        if last["Close"] > last["MA7"] and last["MA7"] > last["MA30"]:
             return "STRONG"
-        elif last["Close"] > last["MA200"]:
+        elif last["Close"] < last["MA7"] and last["MA7"] < last["MA30"]:
             return "WEAK"
         else:
-            return "DOWN"
+            return "NEUTRAL"
     except:
         return "UNKNOWN"
 
 
 def payout_signal(ticker):
     pays = st.session_state.payouts.get(ticker, [])
+
     if len(pays) < 4:
         return "UNKNOWN"
 
-    recent = pays[-1]
-    avg_prev = sum(pays[:-1]) / (len(pays) - 1)
+    recent_avg = (pays[2] + pays[3]) / 2
+    older_avg = (pays[0] + pays[1]) / 2
 
-    if recent >= avg_prev * 0.9:
-        return "STABLE"
-    elif recent >= avg_prev * 0.75:
-        return "WARNING"
+    if recent_avg > older_avg * 1.05:
+        return "RISING"
+    elif recent_avg < older_avg * 0.95:
+        return "FALLING"
     else:
-        return "DROP"
+        return "STABLE"
 
 
 def final_signal(price_sig, pay_sig):
-    if price_sig == "DOWN" or pay_sig == "DROP":
-        return "🔴 REVIEW / ROTATE"
-    if price_sig == "WEAK" or pay_sig == "WARNING":
-        return "🟡 HOLD / SLOW"
-    if price_sig == "STRONG" and pay_sig == "STABLE":
-        return "🟢 HOLD / ADD"
+
+    if pay_sig == "FALLING":
+        return "🔴 REDUCE"
+
+    if price_sig == "WEAK" and pay_sig != "RISING":
+        return "🟠 PAUSE"
+
+    if price_sig == "NEUTRAL" and pay_sig == "RISING":
+        return "🟢 ADD"
+
+    if price_sig == "STRONG":
+        return "🟢 BUY"
+
+    if price_sig == "NEUTRAL":
+        return "🟡 HOLD"
+
     return "⚪ UNKNOWN"
 
 
@@ -94,16 +113,16 @@ for t in st.session_state.etfs:
 if any("🔴" in v for v in signals.values()):
     overall = "🔴 SOME ETFs AT RISK — REVIEW POSITIONS"
     level = "error"
-elif any("🟡" in v for v in signals.values()):
-    overall = "🟡 MIXED SIGNALS — SLOW NEW BUYS"
+elif any("🟠" in v for v in signals.values()):
+    overall = "🟠 CAUTION — SLOW NEW BUYS"
     level = "warning"
 else:
-    overall = "🟢 ALL ETFs STRONG — NORMAL BUYING OK"
+    overall = "🟢 ALL ETFs HEALTHY — NORMAL BUYING OK"
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.0")
-st.caption("Income focus • ETF health monitoring • income protection")
+st.title("🔥 Income Strategy Engine v7.1")
+st.caption("Income focus • ETF health monitoring • momentum + payout protection")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
 if level == "success":
@@ -157,7 +176,7 @@ with st.expander("➕ Manage ETFs"):
                 "yield": 0.05,
                 "type": "Income",
             }
-            st.session_state.payouts[new_ticker] = []
+            st.session_state.payouts[new_ticker] = [0, 0, 0, 0]
             st.rerun()
 
 # =========================================================
@@ -175,7 +194,7 @@ with st.expander("✍️ Update Weekly Distributions"):
         new = []
         for i in range(4):
             new.append(cols[i].number_input(
-                f"W{i+1}", value=float(pays[i]) if i < len(pays) else 0.0, step=0.01, key=f"p_{t}_{i}"
+                f"W{i+1}", value=float(pays[i]), step=0.01, key=f"p_{t}_{i}"
             ))
         st.session_state.payouts[t] = new
 
@@ -229,8 +248,8 @@ with st.expander("📅 Weekly Action Plan"):
     weekly_cash = st.session_state.monthly_add / 4
     st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
 
-    strong = [t for t, v in signals.items() if "🟢" in v]
-    weak = [t for t, v in signals.items() if "🔴" in v]
+    strong = [t for t, v in signals.items() if "BUY" in v or "ADD" in v]
+    weak = [t for t, v in signals.items() if "REDUCE" in v]
 
     if strong:
         st.success(f"Focus new buys on: {', '.join(strong)}")
@@ -249,7 +268,7 @@ with st.expander("📅 Weekly Action Plan"):
 # =========================================================
 with st.expander("💰 Weekly Reinvestment Optimizer"):
 
-    buy_list = [t for t, v in signals.items() if "🟢" in v]
+    buy_list = [t for t, v in signals.items() if "BUY" in v or "ADD" in v]
 
     if not buy_list:
         st.warning("No ETFs currently rated safe to add.")
@@ -321,4 +340,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — reacts to price + distribution changes.")
+st.caption("ETF-focused income protection engine — reacts to price momentum and payout trends.")
