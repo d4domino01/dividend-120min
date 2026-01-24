@@ -94,8 +94,8 @@ def payout_signal(ticker):
     pays = st.session_state.payouts.get(ticker, [])
     if len(pays) < 4:
         return "UNKNOWN"
-    recent_avg = (pays[2] + pays[3]) / 2
-    older_avg = (pays[0] + pays[1]) / 2
+    recent_avg = sum(pays[-2:]) / 2
+    older_avg = sum(pays[:2]) / 2
     if recent_avg > older_avg * 1.05:
         return "RISING"
     elif recent_avg < older_avg * 0.95:
@@ -104,7 +104,21 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-# -------------------- MARKET REGIME FILTER (NEW) --------------------
+# 🆕 Distribution Collapse Detector
+def income_risk_signal(ticker):
+    pays = st.session_state.payouts.get(ticker, [])
+    if len(pays) < 4:
+        return "UNKNOWN"
+
+    recent_avg = sum(pays[-4:]) / 4
+    older_est = sum(pays[:2]) / 2  # proxy for earlier level
+
+    if older_est > 0 and recent_avg < older_est * 0.75:
+        return "COLLAPSING"
+    return "OK"
+
+
+# -------------------- MARKET REGIME FILTER --------------------
 def market_regime_signal():
     try:
         df = yf.download("SPY", period="1y", interval="1d", progress=False)
@@ -124,12 +138,14 @@ def market_regime_signal():
 market_regime = market_regime_signal()
 
 
-def final_signal(ticker, price_sig, pay_sig, underlying_trend):
+def final_signal(ticker, price_sig, pay_sig, income_risk, underlying_trend):
     last_sig = st.session_state.last_price_signal.get(ticker)
 
     base_signal = "⚪ UNKNOWN"
 
-    if underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
+    if income_risk == "COLLAPSING":
+        base_signal = "🔴 REDUCE 33% (Income Risk)"
+    elif underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
         base_signal = "🔴 REDUCE 33%"
     elif underlying_trend == "WEAK":
         base_signal = "🟠 PAUSE (Strategy Weak)"
@@ -162,15 +178,18 @@ for etf, u in UNDERLYING_MAP.items():
 # -------------------- GLOBAL ETF HEALTH --------------------
 signals = {}
 price_signals = {}
+income_risks = {}
 
 for t in st.session_state.etfs:
     p = price_trend_signal(t)
     d = payout_signal(t)
+    ir = income_risk_signal(t)
     u = UNDERLYING_MAP.get(t)
     u_trend = underlying_trends.get(u, "NEUTRAL")
-    f = final_signal(t, p, d, u_trend)
+    f = final_signal(t, p, d, ir, u_trend)
     price_signals[t] = p
     signals[t] = f
+    income_risks[t] = ir
 
 st.session_state.last_price_signal = price_signals.copy()
 
@@ -225,6 +244,8 @@ else:
 status = "HEALTHY"
 if market_regime == "BEAR":
     status = "DEFENSIVE (Market)"
+elif any(v == "COLLAPSING" for v in income_risks.values()):
+    status = "INCOME RISK"
 elif drawdown_pct <= -15:
     status = "DEFENSIVE"
 elif drawdown_pct <= -8:
@@ -248,6 +269,7 @@ for t in st.session_state.etfs:
         t,
         price_signals.get(t),
         payout_signal(t),
+        income_risks.get(t),
         underlying_trends.get(u),
         underlying_vol.get(u),
         signals.get(t),
@@ -255,7 +277,7 @@ for t in st.session_state.etfs:
 
 df = pd.DataFrame(
     rows,
-    columns=["ETF", "ETF Price", "Distribution", "Underlying Trend", "Underlying Vol", "Action"]
+    columns=["ETF", "ETF Price", "Distribution", "Income Risk", "Underlying Trend", "Underlying Vol", "Action"]
 )
 
 st.dataframe(df, use_container_width=True)
@@ -294,8 +316,8 @@ if st.session_state.last_income_snapshot:
     st.write(f"Current: ${monthly_income:,.2f}")
     st.write(f"Change: {income_change_pct:.1f}%")
 
-    if income_change_pct <= -20:
-        st.error("🔴 CRITICAL income deterioration detected")
+    if income_change_pct <= -25:
+        st.error("🔴 CRITICAL income collapse detected")
     elif income_change_pct <= -10:
         st.warning("🟠 Income weakening — monitor closely")
     else:
@@ -440,4 +462,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.7 — market regime aware income strategy with capital preservation priority.")
+st.caption("v8.8 — market regime + income collapse protection for high-yield ETF strategies.")
