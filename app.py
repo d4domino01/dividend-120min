@@ -14,6 +14,13 @@ DEFAULT_ETFS = {
     "XDTE": {"shares": 84, "price": 39.79, "yield": 0.28, "type": "Income"},
 }
 
+# ETF → underlying mapping
+UNDERLYING_MAP = {
+    "QDTE": "QQQ",
+    "XDTE": "SPY",
+    "CHPY": "SOXX",
+}
+
 # -------------------- SESSION STATE --------------------
 if "etfs" not in st.session_state:
     st.session_state.etfs = DEFAULT_ETFS.copy()
@@ -30,7 +37,6 @@ if "snapshots" not in st.session_state:
 if "cash_wallet" not in st.session_state:
     st.session_state.cash_wallet = 0.0
 
-# track last price signal for confirmation
 if "last_price_signal" not in st.session_state:
     st.session_state.last_price_signal = {}
 
@@ -44,10 +50,8 @@ if "payouts" not in st.session_state:
 
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
-
     try:
         df = yf.download(ticker, period="1mo", interval="1d", progress=False)
-
         if len(df) >= 10:
             recent = df.tail(15)
             low = recent["Close"].min()
@@ -56,12 +60,9 @@ def price_trend_signal(ticker):
 
             if last < low * 1.005:
                 return "WEAK"
-
             if last > high * 0.995:
                 return "STRONG"
-
             return "NEUTRAL"
-
     except:
         pass
 
@@ -69,7 +70,6 @@ def price_trend_signal(ticker):
         prices = [v["price"] for v in st.session_state.etfs.values()]
         avg_price = sum(prices) / len(prices)
         p = st.session_state.etfs[ticker]["price"]
-
         if p > avg_price * 1.05:
             return "STRONG"
         elif p < avg_price * 0.95:
@@ -80,9 +80,27 @@ def price_trend_signal(ticker):
         return "NEUTRAL"
 
 
+def volatility_regime(ticker):
+    try:
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        if len(df) >= 10:
+            df["range"] = (df["High"] - df["Low"]) / df["Close"]
+            recent = df["range"].tail(10).mean()
+            long = df["range"].mean()
+
+            if recent < long * 0.7:
+                return "LOW"
+            elif recent > long * 1.3:
+                return "HIGH"
+            else:
+                return "NORMAL"
+    except:
+        pass
+    return "NORMAL"
+
+
 def payout_signal(ticker):
     pays = st.session_state.payouts.get(ticker, [])
-
     if len(pays) < 4:
         return "UNKNOWN"
 
@@ -97,12 +115,17 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-def final_signal(ticker, price_sig, pay_sig):
+def final_signal(ticker, price_sig, pay_sig, underlying_trend):
 
     last_sig = st.session_state.last_price_signal.get(ticker)
 
+    # confirmed ETF breakdown
     if price_sig == "WEAK" and last_sig == "WEAK":
         return "🔴 REDUCE 33%"
+
+    # early warning if underlying weak
+    if underlying_trend == "WEAK" and price_sig != "WEAK":
+        return "🟠 PAUSE (Underlying Weak)"
 
     if price_sig == "WEAK":
         return "🟠 PAUSE"
@@ -119,6 +142,14 @@ def final_signal(ticker, price_sig, pay_sig):
     return "⚪ UNKNOWN"
 
 
+# -------------------- UNDERLYING ANALYSIS --------------------
+underlying_trends = {}
+underlying_vol = {}
+
+for etf, u in UNDERLYING_MAP.items():
+    underlying_trends[u] = price_trend_signal(u)
+    underlying_vol[u] = volatility_regime(u)
+
 # -------------------- GLOBAL ETF HEALTH --------------------
 signals = {}
 price_signals = {}
@@ -126,7 +157,10 @@ price_signals = {}
 for t in st.session_state.etfs:
     p = price_trend_signal(t)
     d = payout_signal(t)
-    f = final_signal(t, p, d)
+    u = UNDERLYING_MAP.get(t)
+    u_trend = underlying_trends.get(u, "NEUTRAL")
+
+    f = final_signal(t, p, d, u_trend)
 
     price_signals[t] = p
     signals[t] = f
@@ -137,15 +171,15 @@ if any("🔴" in v for v in signals.values()):
     overall = "🔴 CONFIRMED WEAKNESS — REDUCE EXPOSURE"
     level = "error"
 elif any("🟠" in v for v in signals.values()):
-    overall = "🟠 CAUTION — WAIT FOR CONFIRMATION"
+    overall = "🟠 CAUTION — STRATEGY ENVIRONMENT DETERIORATING"
     level = "warning"
 else:
-    overall = "🟢 PRICE STRUCTURE HEALTHY — NORMAL BUYING OK"
+    overall = "🟢 STRATEGY ENVIRONMENT HEALTHY"
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.8")
-st.caption("Income focus • auto-shift payouts • confirmation-based selling")
+st.title("🔥 Income Strategy Engine v7.9")
+st.caption("Income focus • predictive underlying monitoring • confirmation-based selling")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
 if level == "success":
@@ -168,7 +202,6 @@ st.session_state.invested = st.number_input(
 # MANAGE ETFs
 # =========================================================
 with st.expander("➕ Manage ETFs"):
-
     for t in list(st.session_state.etfs.keys()):
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
         with c1:
@@ -233,12 +266,32 @@ with st.expander("📊 ETF Strength Monitor", expanded=True):
 
     rows = []
     for t in st.session_state.etfs:
-        p = price_signals.get(t)
-        d = payout_signal(t)
-        f = signals.get(t)
-        rows.append([t, p, d, f])
+        u = UNDERLYING_MAP.get(t)
+        rows.append([
+            t,
+            price_signals.get(t),
+            payout_signal(t),
+            underlying_trends.get(u),
+            underlying_vol.get(u),
+            signals.get(t),
+        ])
 
-    df = pd.DataFrame(rows, columns=["ETF", "Price Trend", "Distribution", "Action"])
+    df = pd.DataFrame(
+        rows,
+        columns=["ETF", "ETF Price", "Distribution", "Underlying Trend", "Underlying Vol", "Action"]
+    )
+    st.dataframe(df, use_container_width=True)
+
+# =========================================================
+# UNDERLYING STRATEGY HEALTH (NEW)
+# =========================================================
+with st.expander("🧠 Underlying Strategy Health Monitor"):
+
+    rows = []
+    for etf, u in UNDERLYING_MAP.items():
+        rows.append([etf, u, underlying_trends.get(u), underlying_vol.get(u)])
+
+    df = pd.DataFrame(rows, columns=["ETF", "Underlying", "Trend", "Volatility"])
     st.dataframe(df, use_container_width=True)
 
 # =========================================================
@@ -252,7 +305,6 @@ with st.expander("📊 Portfolio Snapshot"):
 
     for t, d in st.session_state.etfs.items():
         value = d["shares"] * d["price"]
-
         pays = st.session_state.payouts.get(t, [])
         avg_weekly = sum(pays) / len(pays) if pays else 0
         income = avg_weekly * 4.33 * d["shares"]
@@ -368,4 +420,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — payouts auto-shift, selling only after confirmed breakdown.")
+st.caption("ETF-focused income protection engine — now includes underlying strategy prediction.")
