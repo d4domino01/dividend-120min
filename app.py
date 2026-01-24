@@ -30,6 +30,10 @@ if "snapshots" not in st.session_state:
 if "cash_wallet" not in st.session_state:
     st.session_state.cash_wallet = 0.0
 
+# track last price signal for confirmation
+if "last_price_signal" not in st.session_state:
+    st.session_state.last_price_signal = {}
+
 # ---- manual payout tracking (last 4 weeks) ----
 if "payouts" not in st.session_state:
     st.session_state.payouts = {
@@ -38,31 +42,32 @@ if "payouts" not in st.session_state:
         "CHPY": [0.44, 0.50, 0.51, 0.52],
     }
 
-# ---- NEW: store previous price trends for confirmation ----
-if "prev_price_trend" not in st.session_state:
-    st.session_state.prev_price_trend = {}
-
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
 
     try:
-        df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
 
-        if len(df) >= 30:
-            df["MA7"] = df["Close"].rolling(7).mean()
-            df["MA30"] = df["Close"].rolling(30).mean()
-            last = df.iloc[-1]
+        if len(df) >= 10:
+            recent = df.tail(15)
+            low = recent["Close"].min()
+            high = recent["Close"].max()
+            last = recent["Close"].iloc[-1]
 
-            if not pd.isna(last["MA7"]) and not pd.isna(last["MA30"]):
-                if last["Close"] > last["MA7"] and last["MA7"] > last["MA30"]:
-                    return "STRONG"
-                elif last["Close"] < last["MA7"] and last["MA7"] < last["MA30"]:
-                    return "WEAK"
-                else:
-                    return "NEUTRAL"
+            # break below recent support
+            if last < low * 1.005:
+                return "WEAK"
+
+            # break above recent resistance
+            if last > high * 0.995:
+                return "STRONG"
+
+            return "NEUTRAL"
+
     except:
         pass
 
+    # ----- FALLBACK USING STORED PRICES -----
     try:
         prices = [v["price"] for v in st.session_state.etfs.values()]
         avg_price = sum(prices) / len(prices)
@@ -95,24 +100,23 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-# ✅ PRICE-PRIORITY WITH CONFIRMATION
+# ✅ CONFIRMATION-BASED ACTION LOGIC
 def final_signal(ticker, price_sig, pay_sig):
 
-    prev = st.session_state.prev_price_trend.get(ticker)
+    last_sig = st.session_state.last_price_signal.get(ticker)
 
-    # Price weak two checks in a row → REDUCE
-    if price_sig == "WEAK" and prev == "WEAK":
-        return "🔴 REDUCE"
+    # second consecutive WEAK = REDUCE
+    if price_sig == "WEAK" and last_sig == "WEAK":
+        return "🔴 REDUCE 33%"
 
-    # First weak signal → PAUSE only
+    # first WEAK = PAUSE
     if price_sig == "WEAK":
         return "🟠 PAUSE"
 
-    # Strong price always wins
+    # positive cases
     if price_sig == "STRONG":
         return "🟢 BUY"
 
-    # Neutral price — use distribution as secondary
     if price_sig == "NEUTRAL" and pay_sig == "RISING":
         return "🟢 ADD"
 
@@ -124,27 +128,40 @@ def final_signal(ticker, price_sig, pay_sig):
 
 # -------------------- GLOBAL ETF HEALTH --------------------
 signals = {}
+price_signals = {}
 
 for t in st.session_state.etfs:
     p = price_trend_signal(t)
     d = payout_signal(t)
     f = final_signal(t, p, d)
+
+    price_signals[t] = p
     signals[t] = f
 
-    # store current price trend for next run
-    st.session_state.prev_price_trend[t] = p
+# update last signals AFTER calculation
+st.session_state.last_price_signal = price_signals.copy()
+
+if any("🔴" in v for v in signals.values()):
+    overall = "🔴 CONFIRMED WEAKNESS — REDUCE EXPOSURE"
+    level = "error"
+elif any("🟠" in v for v in signals.values()):
+    overall = "🟠 CAUTION — WAIT FOR CONFIRMATION"
+    level = "warning"
+else:
+    overall = "🟢 PRICE STRUCTURE HEALTHY — NORMAL BUYING OK"
+    level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.6")
-st.caption("Price-priority engine • confirmation before selling • income as secondary signal")
+st.title("🔥 Income Strategy Engine v7.7")
+st.caption("Income focus • support-based price protection • confirmation selling")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
-if any("🔴" in v for v in signals.values()):
-    st.error("🔴 CONFIRMED PRICE WEAKNESS — ROTATION RECOMMENDED")
-elif any("🟠" in v for v in signals.values()):
-    st.warning("🟠 PRICE WARNING — MONITOR NEXT CHECK")
+if level == "success":
+    st.success(overall)
+elif level == "warning":
+    st.warning(overall)
 else:
-    st.success("🟢 PRICE TRENDS HEALTHY — NORMAL BUYING OK")
+    st.error(overall)
 
 # -------------------- USER INPUTS --------------------
 st.session_state.monthly_add = st.number_input(
@@ -159,6 +176,7 @@ st.session_state.invested = st.number_input(
 # MANAGE ETFs
 # =========================================================
 with st.expander("➕ Manage ETFs"):
+
     for t in list(st.session_state.etfs.keys()):
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
         with c1:
@@ -177,7 +195,6 @@ with st.expander("➕ Manage ETFs"):
             if st.button("❌", key=f"d_{t}"):
                 del st.session_state.etfs[t]
                 st.session_state.payouts.pop(t, None)
-                st.session_state.prev_price_trend.pop(t, None)
                 st.rerun()
 
     st.divider()
@@ -197,10 +214,13 @@ with st.expander("➕ Manage ETFs"):
 # UPDATE DISTRIBUTIONS
 # =========================================================
 with st.expander("✍️ Update Weekly Distributions"):
+
     st.info("Enter last 4 weekly payouts per share for each ETF.")
+
     for t in st.session_state.etfs:
         st.write(f"### {t}")
         pays = st.session_state.payouts.get(t, [0, 0, 0, 0])
+
         cols = st.columns(4)
         new = []
         for i in range(4):
@@ -213,68 +233,41 @@ with st.expander("✍️ Update Weekly Distributions"):
 # ETF STRENGTH MONITOR
 # =========================================================
 with st.expander("📊 ETF Strength Monitor", expanded=True):
+
     rows = []
     for t in st.session_state.etfs:
-        p = price_trend_signal(t)
+        p = price_signals.get(t)
         d = payout_signal(t)
-        f = final_signal(t, p, d)
+        f = signals.get(t)
         rows.append([t, p, d, f])
+
     df = pd.DataFrame(rows, columns=["ETF", "Price Trend", "Distribution", "Action"])
     st.dataframe(df, use_container_width=True)
-
-# =========================================================
-# 🚨 WARNING & ROTATION GUIDANCE
-# =========================================================
-with st.expander("🚨 Warning & Rotation Guidance"):
-
-    buy_targets = [t for t, v in signals.items() if "BUY" in v or "ADD" in v]
-    rotate_to = None
-    if buy_targets:
-        rotate_to = max(buy_targets, key=lambda x: st.session_state.etfs[x]["yield"])
-
-    any_action = False
-
-    for t, sig in signals.items():
-        if "REDUCE" in sig:
-            any_action = True
-            shares = st.session_state.etfs[t]["shares"]
-            sell = int(shares * 0.33)
-            cash = sell * st.session_state.etfs[t]["price"]
-
-            st.error(f"🔴 {t} — SELL ~33% ({sell} shares) → ${cash:,.0f}")
-
-            if rotate_to and rotate_to != t:
-                st.success(f"Rotate into: **{rotate_to}**")
-            else:
-                st.info("Hold cash or wait for new BUY signal")
-
-        elif "PAUSE" in sig:
-            any_action = True
-            st.warning(f"🟠 {t} — PRICE WARNING: wait for confirmation before selling")
-
-    if not any_action:
-        st.success("No price warnings this week. Continue normal reinvestment.")
 
 # =========================================================
 # PORTFOLIO SNAPSHOT
 # =========================================================
 with st.expander("📊 Portfolio Snapshot"):
+
     rows = []
     total_value = 0
     monthly_income = 0
 
     for t, d in st.session_state.etfs.items():
         value = d["shares"] * d["price"]
+
         pays = st.session_state.payouts.get(t, [])
         avg_weekly = sum(pays) / len(pays) if pays else 0
         income = avg_weekly * 4.33 * d["shares"]
 
         total_value += value
         monthly_income += income
+
         rows.append([t, d["shares"], f"${d['price']:.2f}", f"${value:,.0f}", f"${income:,.2f}"])
 
     df = pd.DataFrame(rows, columns=["ETF", "Shares", "Price", "Value", "Monthly Income"])
     st.dataframe(df, use_container_width=True)
+
     st.success(f"💼 Portfolio Value: ${total_value:,.0f}")
     st.success(f"💸 Monthly Income (realistic): ${monthly_income:,.2f}")
 
@@ -282,6 +275,7 @@ with st.expander("📊 Portfolio Snapshot"):
 # WEEKLY ACTION PLAN
 # =========================================================
 with st.expander("📅 Weekly Action Plan"):
+
     weekly_cash = st.session_state.monthly_add / 4
     st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
 
@@ -304,6 +298,7 @@ with st.expander("📅 Weekly Action Plan"):
 # WEEKLY REINVESTMENT OPTIMIZER
 # =========================================================
 with st.expander("💰 Weekly Reinvestment Optimizer"):
+
     buy_list = [t for t, v in signals.items() if "BUY" in v or "ADD" in v]
 
     if not buy_list:
@@ -311,6 +306,7 @@ with st.expander("💰 Weekly Reinvestment Optimizer"):
     else:
         best = max(buy_list, key=lambda x: st.session_state.etfs[x]["yield"])
         price = st.session_state.etfs[best]["price"]
+
         shares = int(st.session_state.cash_wallet // price)
         cost = shares * price
 
@@ -330,9 +326,11 @@ with st.expander("💰 Weekly Reinvestment Optimizer"):
 # ETF NEWS FEED
 # =========================================================
 with st.expander("📰 ETF News Feed"):
+
     for t in st.session_state.etfs:
         st.markdown(f"### {t}")
         feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={t}&region=US&lang=en-US"
+
         try:
             feed = feedparser.parse(feed_url)
             if not feed.entries:
@@ -347,6 +345,7 @@ with st.expander("📰 ETF News Feed"):
 # AFTER $1K STRATEGY SIMULATOR
 # =========================================================
 with st.expander("🔁 After $1k Strategy Simulator"):
+
     st.write("When monthly income reaches $1,000:")
     st.write("- 50% reinvest into income ETFs")
     st.write("- 50% shift to growth ETFs")
@@ -356,6 +355,7 @@ with st.expander("🔁 After $1k Strategy Simulator"):
 # TRUE RETURN TRACKING
 # =========================================================
 with st.expander("📈 True Return Tracking"):
+
     if st.button("Save Snapshot"):
         st.session_state.snapshots.append({
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -371,4 +371,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("Price is primary risk signal. Sell only after confirmed weakness.")
+st.caption("ETF-focused income protection engine — sells only after confirmed price breakdown.")
