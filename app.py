@@ -2,19 +2,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from datetime import datetime, timedelta
 
-# -------------------- PAGE CONFIG --------------------
+# ---------------- PAGE ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 
-# -------------------- DEFAULT ETF LIST --------------------
+# ---------------- DEFAULT ETFs ----------------
 DEFAULT_ETFS = {
     "QDTE": {"shares": 110, "type": "Income"},
     "CHPY": {"shares": 55, "type": "Income"},
     "XDTE": {"shares": 69, "type": "Income"},
 }
 
-# -------------------- SESSION STATE INIT --------------------
+# ---------------- STATE ----------------
 if "etfs" not in st.session_state:
     st.session_state.etfs = DEFAULT_ETFS.copy()
 
@@ -24,65 +23,71 @@ if "monthly_add" not in st.session_state:
 if "total_invested" not in st.session_state:
     st.session_state.total_invested = 10000
 
-# -------------------- SAFE MARKET DATA --------------------
-@st.cache_data(ttl=3600)
+# ---------------- DATA ----------------
+@st.cache_data(ttl=1800)
 def get_history(ticker):
     try:
         df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-        if df.empty:
+        if df is None or df.empty:
+            return None
+        if "Close" not in df:
             return None
         return df
     except:
         return None
 
+# ---------------- RISK ENGINE (SAFE) ----------------
 def analyze_risk(ticker):
     df = get_history(ticker)
-    if df is None or len(df) < 15:
-        return "Data unavailable", None
+    if df is None:
+        return "Data unavailable", "none"
 
     close = df["Close"].dropna()
     if len(close) < 15:
-        return "Data unavailable", None
+        return "Data unavailable", "none"
 
-    last = close.iloc[-1]
-    ma20 = close.rolling(20).mean().iloc[-1]
+    try:
+        last = float(close.iloc[-1])
+        ma20 = float(close.rolling(20).mean().iloc[-1])
+        high30 = float(close.tail(30).max())
+    except:
+        return "Data unavailable", "none"
 
-    high30 = close.tail(30).max()
-    if not np.isfinite(last) or not np.isfinite(high30) or high30 == 0:
-        return "Data unavailable", None
+    if not np.isfinite(last) or not np.isfinite(high30) or high30 <= 0:
+        return "Data unavailable", "none"
 
     drop30 = (last - high30) / high30
 
     if drop30 <= -0.20:
-        return "High risk (large drawdown)", "reduce"
+        return "High drawdown risk", "reduce"
     elif last < ma20:
         return "Weak trend", "hold"
     else:
         return "Stable", "add"
 
-# -------------------- HEADER --------------------
-st.title("🔥 Income Strategy Engine v5.0")
+# ---------------- HEADER ----------------
+st.title("🔥 Income Strategy Engine v5.1")
 st.caption("Income focus • reinvest optimization • no forced selling")
 
-# -------------------- TOP STATUS PANEL --------------------
+# ---------------- TOP WARNING PANEL ----------------
 warnings = []
-guidance = []
+adds = []
 
 for t in st.session_state.etfs:
     status, action = analyze_risk(t)
     if action == "reduce":
-        warnings.append(f"{t}: High risk — reduce new buys")
-    if action == "add":
-        guidance.append(f"{t}: Preferred for reinvestment")
+        warnings.append(f"{t}: High drawdown — pause new buys")
+    elif action == "add":
+        adds.append(t)
 
 if warnings:
-    st.error("⚠️ Reinvestment Warnings:\n\n" + "\n".join(warnings))
-elif guidance:
-    st.success("✅ Reinvestment Guidance:\n\n" + "\n".join(guidance))
+    st.error("⚠️ Reinvestment Warnings\n\n" + "\n".join(warnings))
+elif adds:
+    st.success("✅ Preferred Reinvestment Targets\n\n" + "\n".join(adds))
 else:
     st.info("ℹ️ Market data unavailable — guidance paused")
 
-# -------------------- CONTRIBUTIONS --------------------
+# ---------------- CONTRIBUTIONS ----------------
 st.session_state.monthly_add = st.number_input(
     "Monthly cash added ($)", min_value=0, step=50, value=st.session_state.monthly_add
 )
@@ -91,7 +96,7 @@ st.session_state.total_invested = st.number_input(
     "Total invested to date ($)", min_value=0, step=500, value=st.session_state.total_invested
 )
 
-# -------------------- MANAGE ETFS --------------------
+# ---------------- MANAGE ETFs ----------------
 with st.expander("➕ Manage ETFs", expanded=False):
 
     for t in list(st.session_state.etfs.keys()):
@@ -114,7 +119,7 @@ with st.expander("➕ Manage ETFs", expanded=False):
             st.session_state.etfs[new_ticker] = {"shares": 0, "type": "Income"}
             st.rerun()
 
-# -------------------- PORTFOLIO SNAPSHOT --------------------
+# ---------------- PORTFOLIO SNAPSHOT ----------------
 with st.expander("📊 Portfolio Snapshot", expanded=False):
 
     rows = []
@@ -129,10 +134,9 @@ with st.expander("📊 Portfolio Snapshot", expanded=False):
 
     snap = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value"])
     st.dataframe(snap, use_container_width=True)
-
     st.metric("Portfolio Value", f"${total_value:,.0f}")
 
-# -------------------- ETF RISK & PAYOUT STABILITY --------------------
+# ---------------- ETF RISK & PAYOUT ----------------
 with st.expander("⚠️ ETF Risk & Payout Stability", expanded=False):
 
     for t in st.session_state.etfs:
@@ -141,48 +145,43 @@ with st.expander("⚠️ ETF Risk & Payout Stability", expanded=False):
             st.success(f"{t}: {status}")
         elif status == "Weak trend":
             st.warning(f"{t}: {status}")
-        elif status == "High risk (large drawdown)":
+        elif status == "High drawdown risk":
             st.error(f"{t}: {status}")
         else:
             st.info(f"{t}: {status}")
 
-# -------------------- WEEKLY ACTION PLAN --------------------
+# ---------------- WEEKLY ACTION PLAN ----------------
 with st.expander("📅 Weekly Action Plan", expanded=False):
 
-    st.write("### This Week's Focus")
-
-    adds = []
+    buys = []
     holds = []
 
     for t in st.session_state.etfs:
         status, action = analyze_risk(t)
         if action == "add":
-            adds.append(t)
+            buys.append(t)
         elif action == "hold":
             holds.append(t)
 
-    if adds:
-        st.success("Increase buys: " + ", ".join(adds))
+    if buys:
+        st.success("Increase buys: " + ", ".join(buys))
     if holds:
-        st.info("Hold / smaller buys: " + ", ".join(holds))
-    if not adds and not holds:
-        st.warning("No actionable signals — wait for clearer trends")
+        st.info("Smaller buys / hold: " + ", ".join(holds))
+    if not buys and not holds:
+        st.warning("No clear signals this week")
 
-# -------------------- AFTER $1K SIMULATOR --------------------
+# ---------------- AFTER $1K ----------------
 with st.expander("🔁 After $1k Strategy Simulator", expanded=False):
     st.write("""
 When income reaches $1,000/month:
 
-• 50% continue income reinvest  
-• 50% rotate into growth ETFs  
-• Crash mode increases growth allocation
-
-(Next upgrade: dynamic growth targets)
+• 50% stays in income ETFs  
+• 50% rotates into growth ETFs  
+• Crash mode increases growth allocation  
 """)
 
-# -------------------- TRUE RETURN TRACKING --------------------
+# ---------------- TRUE RETURN ----------------
 with st.expander("📈 True Return Tracking", expanded=False):
-    st.write("Snapshot saving & performance tracking coming next.")
+    st.write("Snapshot history & performance curves coming next.")
 
-# -------------------- FOOTER --------------------
-st.caption("Built for long-term income compounding — not trading.")
+st.caption("Built for income compounding — not day trading.")
