@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import feedparser
 import yfinance as yf
+import matplotlib.pyplot as plt
 
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -178,9 +179,7 @@ if st.session_state.last_income_snapshot:
     )
 
 # -------------------- HEADER --------------------
-st.markdown(
-    "## 🔥 Dividend Strategy"
-)
+st.markdown("## 🔥 Dividend Strategy")
 
 # -------------------- KPI CARDS --------------------
 c1, c2, c3, c4 = st.columns(4)
@@ -193,7 +192,6 @@ if income_change_pct is not None:
 else:
     c3.metric("📉 Income Change", "—")
 
-# 🆕 strategy status now includes drawdown
 status = "HEALTHY"
 if drawdown_pct <= -15:
     status = "DEFENSIVE"
@@ -205,6 +203,35 @@ elif any("🟠" in v for v in signals.values()):
     status = "CAUTION"
 
 c4.metric("🛡 Strategy Status", status)
+
+# =========================================================
+# 🎯 MONTHLY INCOME TARGET PROGRESS ($1000 GOAL)
+# =========================================================
+st.subheader("🎯 Income Target Progress")
+
+goal = 1000
+progress = min(monthly_income, goal)
+remaining = max(goal - monthly_income, 0)
+
+fig, ax = plt.subplots(figsize=(4, 4))
+
+ax.pie(
+    [progress, remaining],
+    startangle=90,
+    wedgeprops=dict(width=0.4),
+)
+
+ax.text(
+    0, 0,
+    f"${monthly_income:.0f}\n/ $1000",
+    ha="center",
+    va="center",
+    fontsize=14,
+    fontweight="bold"
+)
+
+ax.set_aspect("equal")
+st.pyplot(fig)
 
 # =========================================================
 # 📊 MAIN DASHBOARD
