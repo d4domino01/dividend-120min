@@ -38,6 +38,10 @@ if "payouts" not in st.session_state:
         "CHPY": [0.44, 0.50, 0.51, 0.52],
     }
 
+# ---- NEW: store previous price trends for confirmation ----
+if "prev_price_trend" not in st.session_state:
+    st.session_state.prev_price_trend = {}
+
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
 
@@ -91,20 +95,24 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-def final_signal(price_sig, pay_sig):
+# ✅ PRICE-PRIORITY WITH CONFIRMATION
+def final_signal(ticker, price_sig, pay_sig):
 
-    if price_sig == "WEAK" and pay_sig == "FALLING":
+    prev = st.session_state.prev_price_trend.get(ticker)
+
+    # Price weak two checks in a row → REDUCE
+    if price_sig == "WEAK" and prev == "WEAK":
         return "🔴 REDUCE"
 
-    if price_sig == "WEAK" and pay_sig != "FALLING":
+    # First weak signal → PAUSE only
+    if price_sig == "WEAK":
         return "🟠 PAUSE"
 
-    if price_sig != "WEAK" and pay_sig == "FALLING":
-        return "🟠 PAUSE"
-
+    # Strong price always wins
     if price_sig == "STRONG":
         return "🟢 BUY"
 
+    # Neutral price — use distribution as secondary
     if price_sig == "NEUTRAL" and pay_sig == "RISING":
         return "🟢 ADD"
 
@@ -120,30 +128,23 @@ signals = {}
 for t in st.session_state.etfs:
     p = price_trend_signal(t)
     d = payout_signal(t)
-    f = final_signal(p, d)
+    f = final_signal(t, p, d)
     signals[t] = f
 
-if any("🔴" in v for v in signals.values()):
-    overall = "🔴 SOME ETFs AT RISK — REVIEW POSITIONS"
-    level = "error"
-elif any("🟠" in v for v in signals.values()):
-    overall = "🟠 CAUTION — SLOW NEW BUYS"
-    level = "warning"
-else:
-    overall = "🟢 ALL ETFs HEALTHY — NORMAL BUYING OK"
-    level = "success"
+    # store current price trend for next run
+    st.session_state.prev_price_trend[t] = p
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.5")
-st.caption("Income focus • ETF health monitoring • smart dual-signal protection")
+st.title("🔥 Income Strategy Engine v7.6")
+st.caption("Price-priority engine • confirmation before selling • income as secondary signal")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
-if level == "success":
-    st.success(overall)
-elif level == "warning":
-    st.warning(overall)
+if any("🔴" in v for v in signals.values()):
+    st.error("🔴 CONFIRMED PRICE WEAKNESS — ROTATION RECOMMENDED")
+elif any("🟠" in v for v in signals.values()):
+    st.warning("🟠 PRICE WARNING — MONITOR NEXT CHECK")
 else:
-    st.error(overall)
+    st.success("🟢 PRICE TRENDS HEALTHY — NORMAL BUYING OK")
 
 # -------------------- USER INPUTS --------------------
 st.session_state.monthly_add = st.number_input(
@@ -176,6 +177,7 @@ with st.expander("➕ Manage ETFs"):
             if st.button("❌", key=f"d_{t}"):
                 del st.session_state.etfs[t]
                 st.session_state.payouts.pop(t, None)
+                st.session_state.prev_price_trend.pop(t, None)
                 st.rerun()
 
     st.divider()
@@ -215,13 +217,13 @@ with st.expander("📊 ETF Strength Monitor", expanded=True):
     for t in st.session_state.etfs:
         p = price_trend_signal(t)
         d = payout_signal(t)
-        f = final_signal(p, d)
+        f = final_signal(t, p, d)
         rows.append([t, p, d, f])
     df = pd.DataFrame(rows, columns=["ETF", "Price Trend", "Distribution", "Action"])
     st.dataframe(df, use_container_width=True)
 
 # =========================================================
-# 🔥 WARNING & ROTATION GUIDANCE (NEW — ADDITIVE)
+# 🚨 WARNING & ROTATION GUIDANCE
 # =========================================================
 with st.expander("🚨 Warning & Rotation Guidance"):
 
@@ -248,10 +250,10 @@ with st.expander("🚨 Warning & Rotation Guidance"):
 
         elif "PAUSE" in sig:
             any_action = True
-            st.warning(f"🟠 {t} — PAUSE: Stop new buys, monitor next week")
+            st.warning(f"🟠 {t} — PRICE WARNING: wait for confirmation before selling")
 
     if not any_action:
-        st.success("No warnings this week. Continue normal reinvestment.")
+        st.success("No price warnings this week. Continue normal reinvestment.")
 
 # =========================================================
 # PORTFOLIO SNAPSHOT
@@ -369,4 +371,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — sells ~33% only when BOTH price and income weaken.")
+st.caption("Price is primary risk signal. Sell only after confirmed weakness.")
