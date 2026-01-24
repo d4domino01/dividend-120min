@@ -26,11 +26,11 @@ if "snapshots" not in st.session_state:
     st.session_state.snapshots = []
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v5.2")
+st.title("🔥 Income Strategy Engine v5.4")
 st.caption("Income focus • reinvest optimization • no forced selling")
 
-# -------------------- TOP WARNING PANEL --------------------
-st.success("🟢 System Stable — no ETF payout risk detected.")
+# -------------------- TOP STATUS PANEL --------------------
+st.success("🟢 Strategy Mode: Income-Max (single ETF focus)")
 
 # -------------------- USER INPUTS --------------------
 st.session_state.monthly_add = st.number_input(
@@ -56,7 +56,9 @@ with st.expander("➕ Manage ETFs"):
             )
         with c3:
             st.session_state.etfs[t]["type"] = st.selectbox(
-                "Type", ["Income", "Growth"], index=0 if st.session_state.etfs[t]["type"] == "Income" else 1, key=f"t_{t}"
+                "Type", ["Income", "Growth"],
+                index=0 if st.session_state.etfs[t]["type"] == "Income" else 1,
+                key=f"t_{t}"
             )
         with c4:
             if st.button("❌", key=f"d_{t}"):
@@ -114,10 +116,12 @@ with st.expander("📅 Weekly Action Plan"):
     weekly_cash = st.session_state.monthly_add / 4
     st.write(f"Weekly cash available: **${weekly_cash:,.2f}**")
 
-    st.write("Focus on highest yield ETF unless price becomes extreme.")
+    st.write("Strategy:")
+    st.write("- Focus all new money into highest yield ETF")
+    st.write("- No selling during income build phase")
 
 # =========================================================
-# WEEKLY REINVESTMENT OPTIMIZER (WHOLE SHARES)
+# WEEKLY REINVESTMENT OPTIMIZER — SINGLE ETF
 # =========================================================
 with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
 
@@ -126,29 +130,25 @@ with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
     if not income_etfs:
         st.warning("No income ETFs selected.")
     else:
-        total_yield = sum(d["yield"] for d in income_etfs.values())
         weekly_cash = st.session_state.monthly_add / 4
-        remaining = weekly_cash
 
-        st.write("### Suggested buys (whole shares only)")
+        # pick highest yield ETF
+        best_ticker = max(income_etfs, key=lambda x: income_etfs[x]["yield"])
+        best = income_etfs[best_ticker]
 
-        plan = []
+        shares = int(weekly_cash // best["price"])
+        cost = shares * best["price"]
+        remaining = weekly_cash - cost
 
-        for t, d in income_etfs.items():
-            weight = d["yield"] / total_yield
-            alloc = weekly_cash * weight
-            shares = int(alloc // d["price"])
-            cost = shares * d["price"]
-            remaining -= cost
-            plan.append((t, shares, cost))
+        st.write("### 🎯 Income-Max Strategy (single ETF)")
 
-        for t, s, c in plan:
-            if s > 0:
-                st.success(f"{t}: Buy **{s} shares** → ${c:,.2f}")
-            else:
-                st.info(f"{t}: Not enough cash for 1 share")
+        st.success(f"Best yield ETF: **{best_ticker}** ({best['yield']*100:.1f}%)")
 
-        st.divider()
+        if shares > 0:
+            st.success(f"Buy **{shares} shares** → ${cost:,.2f}")
+        else:
+            st.warning("Not enough weekly cash to buy 1 share yet.")
+
         st.write(f"💵 Cash left over: **${remaining:,.2f}**")
 
 # =========================================================
@@ -179,3 +179,6 @@ with st.expander("📈 True Return Tracking"):
         st.dataframe(df, use_container_width=True)
     else:
         st.info("No snapshots saved yet.")
+
+# -------------------- FOOTER --------------------
+st.caption("Stable income compounding engine — built for long-term cashflow.")
