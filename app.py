@@ -178,8 +178,8 @@ if st.session_state.last_income_snapshot:
 # -------------------- HEADER --------------------
 st.markdown("## 💰 Dividend Strategy")
 
-# -------------------- KPI + GOAL BAR --------------------
-c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1.2, 1.2, 0.6])
+# -------------------- KPI + GOAL METER --------------------
+c1, c2, c3, c4, c5 = st.columns([1.3, 1.3, 1.3, 1.3, 0.6])
 
 c1.metric("💼 Portfolio", f"${total_value:,.0f}")
 c2.metric("💸 Monthly", f"${monthly_income:,.2f}")
@@ -201,18 +201,25 @@ elif any("🟠" in v for v in signals.values()):
 
 c4.metric("🛡 Status", status)
 
+# ---- GREEN / GREY VERTICAL GOAL METER ----
 goal = 1000
-progress_ratio = min(monthly_income / goal, 1.0)
+pct = min(monthly_income / goal, 1.0)
+blocks = int(pct * 10)
 
-bar_df = pd.DataFrame({"$1k Goal": [progress_ratio]})
+meter = ""
+for i in range(10):
+    if i < blocks:
+        meter = "🟩\n" + meter
+    else:
+        meter = "⬜\n" + meter
 
 with c5:
-    st.caption("🎯 Goal")
-    st.bar_chart(bar_df, height=180)
-    st.caption(f"{int(progress_ratio * 100)}%")
+    st.markdown("🎯 **Goal**")
+    st.markdown(meter)
+    st.caption(f"${monthly_income:.0f} / $1000")
 
 # =========================================================
-# 📊 STRATEGY MONITOR
+# 📊 MAIN DASHBOARD
 # =========================================================
 st.subheader("📊 Strategy & ETF Monitor")
 
@@ -275,7 +282,7 @@ else:
     st.success("🟢 Drawdown within normal range")
 
 # =========================================================
-# 📈 PERFORMANCE CHARTS
+# 📈 CHARTS
 # =========================================================
 st.subheader("📈 Performance Overview")
 
@@ -295,6 +302,7 @@ else:
 # ⚙️ PORTFOLIO ACTIONS
 # =========================================================
 with st.expander("⚙️ Portfolio Actions"):
+
     weekly_cash = st.session_state.monthly_add / 4
     st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
 
@@ -361,6 +369,7 @@ with st.expander("⚙️ Portfolio Actions"):
 # 🌍 MARKET INTELLIGENCE
 # =========================================================
 with st.expander("🌍 Market Intelligence"):
+
     for label, ticker in {"QQQ (QDTE)": "QQQ", "SPY (XDTE)": "SPY", "SOXX (CHPY)": "SOXX"}.items():
         st.markdown(f"### {label}")
         feed = feedparser.parse(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US")
@@ -375,9 +384,10 @@ with st.expander("🌍 Market Intelligence"):
             st.write("•", e.title)
 
 # =========================================================
-# 📈 SNAPSHOT SAVE
+# 📈 TRUE RETURN TRACKING
 # =========================================================
 with st.expander("📈 Save Portfolio Snapshot"):
+
     if st.button("Save Snapshot"):
         st.session_state.snapshots.append({
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -388,4 +398,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.6 — income + drawdown protection with goal tracking.")
+st.caption("v8.6 — income + drawdown protection for high-yield ETF strategies.")
