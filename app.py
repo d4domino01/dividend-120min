@@ -176,13 +176,13 @@ if st.session_state.last_income_snapshot:
     )
 
 # -------------------- HEADER --------------------
-st.markdown("## 💰 Dividend Strategy")
+st.markdown("## 🔥 Dividend Strategy")
 
-# -------------------- KPI + GOAL METER --------------------
-c1, c2, c3, c4, c5 = st.columns([1.3, 1.3, 1.3, 1.3, 0.6])
+# -------------------- KPI + GOAL ROW --------------------
+c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1, 1, 1.2])
 
-c1.metric("💼 Portfolio", f"${total_value:,.0f}")
-c2.metric("💸 Monthly", f"${monthly_income:,.2f}")
+c1.metric("💼 Value", f"${total_value:,.0f}")
+c2.metric("💸 Income", f"${monthly_income:,.2f}")
 
 if income_change_pct is not None:
     c3.metric("📉 Change", f"{income_change_pct:.1f}%", delta=f"{income_change_pct:.1f}%")
@@ -201,25 +201,25 @@ elif any("🟠" in v for v in signals.values()):
 
 c4.metric("🛡 Status", status)
 
-# ---- GREEN / GREY VERTICAL GOAL METER ----
+# ---- GOAL BAR (LEFT ➜ RIGHT) ----
 goal = 1000
 pct = min(monthly_income / goal, 1.0)
 blocks = int(pct * 10)
 
-meter = ""
+bar = ""
 for i in range(10):
     if i < blocks:
-        meter = "🟩\n" + meter
+        bar += "🟩 "
     else:
-        meter = "⬜\n" + meter
+        bar += "⬜ "
 
 with c5:
     st.markdown("🎯 **Goal**")
-    st.markdown(meter)
+    st.markdown(bar)
     st.caption(f"${monthly_income:.0f} / $1000")
 
 # =========================================================
-# 📊 MAIN DASHBOARD
+# 📊 STRATEGY MONITOR
 # =========================================================
 st.subheader("📊 Strategy & ETF Monitor")
 
@@ -282,7 +282,7 @@ else:
     st.success("🟢 Drawdown within normal range")
 
 # =========================================================
-# 📈 CHARTS
+# 📈 PERFORMANCE
 # =========================================================
 st.subheader("📈 Performance Overview")
 
@@ -320,14 +320,11 @@ with st.expander("⚙️ Portfolio Actions"):
     if buy_list:
         best = max(buy_list, key=lambda x: st.session_state.etfs[x]["yield"])
         price = st.session_state.etfs[best]["price"]
-        shares = int(st.session_state.cash_wallet // price)
-        cost = shares * price
-
-        st.success(f"Recommended: **{best}**")
+        shares = int(st.session_state.cash_wallet //
 
         if shares > 0 and st.button("✅ Execute Buy"):
             st.session_state.etfs[best]["shares"] += shares
-            st.session_state.cash_wallet -= cost
+            st.session_state.cash_wallet -= shares * price
             st.rerun()
     else:
         st.info("No ETFs safe to buy.")
@@ -384,7 +381,7 @@ with st.expander("🌍 Market Intelligence"):
             st.write("•", e.title)
 
 # =========================================================
-# 📈 TRUE RETURN TRACKING
+# 📈 SNAPSHOTS
 # =========================================================
 with st.expander("📈 Save Portfolio Snapshot"):
 
@@ -398,4 +395,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.6 — income + drawdown protection for high-yield ETF strategies.")
+st.caption("Dividend Strategy — income growth with capital protection.")
