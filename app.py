@@ -115,27 +115,31 @@ def payout_signal(ticker):
         return "STABLE"
 
 
+# 🧠 UNDERLYING-FIRST DECISION ENGINE
 def final_signal(ticker, price_sig, pay_sig, underlying_trend):
 
     last_sig = st.session_state.last_price_signal.get(ticker)
 
-    if price_sig == "WEAK" and last_sig == "WEAK":
+    # 🔴 reduce only when strategy AND ETF confirm
+    if underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
         return "🔴 REDUCE 33%"
 
-    if underlying_trend == "WEAK" and price_sig != "WEAK":
-        return "🟠 PAUSE (Underlying Weak)"
+    # 🟠 pause when strategy weak even if ETF still stable
+    if underlying_trend == "WEAK":
+        return "🟠 PAUSE (Strategy Weak)"
 
-    if price_sig == "WEAK":
-        return "🟠 PAUSE"
-
-    if price_sig == "STRONG":
+    # 🟢 positive conditions
+    if price_sig == "STRONG" and underlying_trend != "WEAK":
         return "🟢 BUY"
 
-    if price_sig == "NEUTRAL" and pay_sig == "RISING":
+    if price_sig == "NEUTRAL" and pay_sig == "RISING" and underlying_trend != "WEAK":
         return "🟢 ADD"
 
     if price_sig == "NEUTRAL":
         return "🟡 HOLD"
+
+    if price_sig == "WEAK":
+        return "🟠 PAUSE"
 
     return "⚪ UNKNOWN"
 
@@ -166,18 +170,18 @@ for t in st.session_state.etfs:
 st.session_state.last_price_signal = price_signals.copy()
 
 if any("🔴" in v for v in signals.values()):
-    overall = "🔴 CONFIRMED WEAKNESS — REDUCE EXPOSURE"
+    overall = "🔴 STRATEGY + ETF CONFIRMED WEAKNESS — REDUCE EXPOSURE"
     level = "error"
 elif any("🟠" in v for v in signals.values()):
-    overall = "🟠 CAUTION — STRATEGY ENVIRONMENT DETERIORATING"
+    overall = "🟠 STRATEGY RISK RISING — DEFENSIVE MODE"
     level = "warning"
 else:
     overall = "🟢 STRATEGY ENVIRONMENT HEALTHY"
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v8.0")
-st.caption("Income focus • predictive underlying monitoring • strategy-driven news")
+st.title("🔥 Income Strategy Engine v8.1")
+st.caption("Underlying-first strategy model • ETF price as confirmation")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
 if level == "success":
@@ -281,7 +285,7 @@ with st.expander("📊 ETF Strength Monitor", expanded=True):
     st.dataframe(df, use_container_width=True)
 
 # =========================================================
-# UNDERLYING STRATEGY HEALTH (NEW)
+# UNDERLYING STRATEGY HEALTH
 # =========================================================
 with st.expander("🧠 Underlying Strategy Health Monitor"):
 
@@ -370,7 +374,7 @@ with st.expander("💰 Weekly Reinvestment Optimizer"):
             st.info("Not enough wallet cash yet to buy 1 share.")
 
 # =========================================================
-# ETF NEWS FEED (UNCHANGED)
+# ETF NEWS FEED
 # =========================================================
 with st.expander("📰 ETF News Feed"):
 
@@ -389,7 +393,7 @@ with st.expander("📰 ETF News Feed"):
             st.info("News unavailable.")
 
 # =========================================================
-# UNDERLYING MARKET NEWS (NEW)
+# UNDERLYING MARKET NEWS
 # =========================================================
 with st.expander("🌍 Underlying Market News"):
 
@@ -437,4 +441,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — now includes underlying strategy prediction and market news.")
+st.caption("ETF-focused income protection engine — strategy environment leads, ETF price confirms.")
