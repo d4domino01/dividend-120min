@@ -179,7 +179,7 @@ if st.session_state.last_income_snapshot:
 
 # -------------------- HEADER --------------------
 st.markdown(
-    "## 🔥 Dividend Strategy v8.5"
+    "## 🔥 Dividend Strategy"
 )
 
 # -------------------- KPI CARDS --------------------
