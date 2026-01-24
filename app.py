@@ -108,7 +108,7 @@ def final_signal(ticker, price_sig, pay_sig, underlying_trend):
     if underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
         return "🔴 REDUCE 33%"
     if underlying_trend == "WEAK":
-        return "🟠 PAUSE (Strategy Weak)"
+        return "🟠 PAUSE"
     if price_sig == "STRONG":
         return "🟢 BUY"
     if price_sig == "NEUTRAL" and pay_sig == "RISING":
@@ -167,14 +167,6 @@ drawdown_pct = (
     * 100
 )
 
-income_change_pct = None
-if st.session_state.last_income_snapshot:
-    income_change_pct = (
-        (monthly_income - st.session_state.last_income_snapshot)
-        / st.session_state.last_income_snapshot
-        * 100
-    )
-
 # -------------------- HEADER --------------------
 st.markdown("## 🔥 Dividend Strategy")
 
@@ -183,11 +175,7 @@ c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 1, 1, 1.4])
 
 c1.metric("💼 Value", f"${total_value:,.0f}")
 c2.metric("💸 Income", f"${monthly_income:,.2f}")
-
-if income_change_pct is not None:
-    c3.metric("📉 Change", f"{income_change_pct:.1f}%")
-else:
-    c3.metric("📉 Change", "—")
+c3.metric("📉 DD", f"{drawdown_pct:.1f}%")
 
 status = "HEALTHY"
 if drawdown_pct <= -15:
@@ -201,22 +189,41 @@ elif any("🟠" in v for v in signals.values()):
 
 c4.metric("🛡 Status", status)
 
-# ---- GOAL BAR (LEFT ➜ RIGHT) ----
 goal = 1000
 pct = min(monthly_income / goal, 1.0)
 blocks = int(pct * 10)
 
 bar = ""
 for i in range(10):
-    if i < blocks:
-        bar += "🟩 "
-    else:
-        bar += "⬜ "
+    bar += "🟩 " if i < blocks else "⬜ "
 
 with c5:
     st.markdown("🎯 **Goal**")
     st.markdown(bar)
     st.caption(f"${monthly_income:.0f} / $1000")
+
+# =========================================================
+# 📌 TRADE PLANNER (WHAT TO BUY / SELL / HOLD)
+# =========================================================
+st.subheader("📌 Trade Planner")
+
+plans = []
+
+for t, sig in signals.items():
+    shares = st.session_state.etfs[t]["shares"]
+    price = st.session_state.etfs[t]["price"]
+
+    if "REDUCE" in sig:
+        sell = int(shares * 0.33)
+        plans.append([t, sig, f"SELL {sell}"])
+    elif "BUY" in sig or "ADD" in sig:
+        buy = int(st.session_state.cash_wallet // price)
+        plans.append([t, sig, f"BUY {buy}"])
+    else:
+        plans.append([t, sig, "HOLD"])
+
+plan_df = pd.DataFrame(plans, columns=["ETF", "Signal", "Action"])
+st.dataframe(plan_df, use_container_width=True)
 
 # =========================================================
 # 📊 STRATEGY MONITOR
@@ -248,13 +255,12 @@ st.dataframe(df, use_container_width=True)
 st.subheader("🚨 Income Shock Monitor")
 
 if st.session_state.last_income_snapshot:
-    st.write(f"Baseline: ${st.session_state.last_income_snapshot:,.2f}")
-    st.write(f"Current: ${monthly_income:,.2f}")
-    st.write(f"Change: {income_change_pct:.1f}%")
+    change = (monthly_income - st.session_state.last_income_snapshot) / st.session_state.last_income_snapshot * 100
+    st.write(f"Change: {change:.1f}%")
 
-    if income_change_pct <= -20:
+    if change <= -20:
         st.error("🔴 CRITICAL income deterioration detected")
-    elif income_change_pct <= -10:
+    elif change <= -10:
         st.warning("🟠 Income weakening — monitor closely")
     else:
         st.success("🟢 Income stable")
@@ -270,129 +276,28 @@ if st.button("📌 Save Income Baseline"):
 # =========================================================
 st.subheader("🛡 Drawdown Guard")
 
-st.write(f"Peak value: ${st.session_state.peak_portfolio_value:,.0f}")
-st.write(f"Current value: ${total_value:,.0f}")
+st.write(f"Peak: ${st.session_state.peak_portfolio_value:,.0f}")
+st.write(f"Now: ${total_value:,.0f}")
 st.write(f"Drawdown: {drawdown_pct:.1f}%")
 
 if drawdown_pct <= -15:
-    st.error("🔴 DEFENSIVE MODE — reduce risk exposure")
+    st.error("🔴 DEFENSIVE MODE — reduce risk")
 elif drawdown_pct <= -8:
-    st.warning("🟠 CAUTION — drawdown increasing")
+    st.warning("🟠 CAUTION — drawdown rising")
 else:
-    st.success("🟢 Drawdown within normal range")
-
-# =========================================================
-# 📈 PERFORMANCE
-# =========================================================
-st.subheader("📈 Performance Overview")
-
-if st.session_state.snapshots:
-    df_snap = pd.DataFrame(st.session_state.snapshots)
-    df_snap["date"] = pd.to_datetime(df_snap["date"])
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.line_chart(df_snap.set_index("date")["portfolio_value"])
-    with c2:
-        st.line_chart(df_snap.set_index("date")["wallet"])
-else:
-    st.info("Save snapshots to build performance charts.")
-
-# =========================================================
-# ⚙️ PORTFOLIO ACTIONS
-# =========================================================
-with st.expander("⚙️ Portfolio Actions"):
-
-    weekly_cash = st.session_state.monthly_add / 4
-    st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
-
-    if st.button("➕ Add Weekly Cash to Wallet"):
-        st.session_state.cash_wallet += weekly_cash
-        st.rerun()
-
-    st.write(f"Cash wallet: **${st.session_state.cash_wallet:,.2f}**")
-
-    st.divider()
-    st.subheader("Reinvestment Optimizer")
-
-    buy_list = [t for t, v in signals.items() if "BUY" in v or "ADD" in v]
-
-    if buy_list:
-        best = max(buy_list, key=lambda x: st.session_state.etfs[x]["yield"])
-        price = st.session_state.etfs[best]["price"]
-        shares = int(st.session_state.cash_wallet // price)
-
-        if shares > 0 and st.button("✅ Execute Buy"):
-            st.session_state.etfs[best]["shares"] += shares
-            st.session_state.cash_wallet -= shares * price
-            st.rerun()
-    else:
-        st.info("No ETFs safe to buy.")
-
-    st.divider()
-    st.subheader("Manage ETFs")
-
-    for t in list(st.session_state.etfs.keys()):
-        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-        with c1:
-            st.write(t)
-        with c2:
-            st.session_state.etfs[t]["shares"] = st.number_input(
-                f"{t} shares", min_value=0, value=st.session_state.etfs[t]["shares"], key=f"s_{t}"
-            )
-        with c3:
-            st.session_state.etfs[t]["type"] = st.selectbox(
-                "Type", ["Income", "Growth"],
-                index=0 if st.session_state.etfs[t]["type"] == "Income" else 1,
-                key=f"t_{t}"
-            )
-        with c4:
-            if st.button("❌", key=f"d_{t}"):
-                del st.session_state.etfs[t]
-                st.session_state.payouts.pop(t, None)
-                st.rerun()
-
-    st.divider()
-    st.subheader("Update Weekly Distributions")
-
-    for t in st.session_state.etfs:
-        new_val = st.number_input(f"This week payout for {t}", min_value=0.0, step=0.01, key=f"newpay_{t}")
-        if st.button(f"Save — {t}", key=f"save_{t}"):
-            old = st.session_state.payouts.get(t, [0, 0, 0, 0])
-            st.session_state.payouts[t] = [old[1], old[2], old[3], new_val]
-            st.rerun()
-
-# =========================================================
-# 🌍 MARKET INTELLIGENCE
-# =========================================================
-with st.expander("🌍 Market Intelligence"):
-
-    for label, ticker in {"QQQ (QDTE)": "QQQ", "SPY (XDTE)": "SPY", "SOXX (CHPY)": "SOXX"}.items():
-        st.markdown(f"### {label}")
-        feed = feedparser.parse(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US")
-        for e in feed.entries[:5]:
-            st.write("•", e.title)
-
-    st.divider()
-    for t in st.session_state.etfs:
-        st.markdown(f"### {t}")
-        feed = feedparser.parse(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={t}&region=US&lang=en-US")
-        for e in feed.entries[:5]:
-            st.write("•", e.title)
+    st.success("🟢 Normal range")
 
 # =========================================================
 # 📈 SNAPSHOTS
 # =========================================================
 with st.expander("📈 Save Portfolio Snapshot"):
-
     if st.button("Save Snapshot"):
         st.session_state.snapshots.append({
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "invested": st.session_state.invested,
             "portfolio_value": total_value,
             "wallet": round(st.session_state.cash_wallet, 2),
         })
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("Dividend Strategy — income growth with capital protection.")
+st.caption("Dividend Strategy — income first, capital protected.")
