@@ -104,21 +104,52 @@ def payout_signal(ticker):
         return "STABLE"
 
 
+# -------------------- MARKET REGIME FILTER (NEW) --------------------
+def market_regime_signal():
+    try:
+        df = yf.download("SPY", period="1y", interval="1d", progress=False)
+        if len(df) >= 200:
+            df["MA50"] = df["Close"].rolling(50).mean()
+            df["MA200"] = df["Close"].rolling(200).mean()
+            last = df.iloc[-1]
+            if last["MA50"] < last["MA200"]:
+                return "BEAR"
+            else:
+                return "BULL"
+    except:
+        pass
+    return "UNKNOWN"
+
+
+market_regime = market_regime_signal()
+
+
 def final_signal(ticker, price_sig, pay_sig, underlying_trend):
     last_sig = st.session_state.last_price_signal.get(ticker)
+
+    base_signal = "⚪ UNKNOWN"
+
     if underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
-        return "🔴 REDUCE 33%"
-    if underlying_trend == "WEAK":
-        return "🟠 PAUSE (Strategy Weak)"
-    if price_sig == "STRONG":
-        return "🟢 BUY"
-    if price_sig == "NEUTRAL" and pay_sig == "RISING":
-        return "🟢 ADD"
-    if price_sig == "NEUTRAL":
-        return "🟡 HOLD"
-    if price_sig == "WEAK":
-        return "🟠 PAUSE"
-    return "⚪ UNKNOWN"
+        base_signal = "🔴 REDUCE 33%"
+    elif underlying_trend == "WEAK":
+        base_signal = "🟠 PAUSE (Strategy Weak)"
+    elif price_sig == "STRONG":
+        base_signal = "🟢 BUY"
+    elif price_sig == "NEUTRAL" and pay_sig == "RISING":
+        base_signal = "🟢 ADD"
+    elif price_sig == "NEUTRAL":
+        base_signal = "🟡 HOLD"
+    elif price_sig == "WEAK":
+        base_signal = "🟠 PAUSE"
+
+    # ----- MARKET REGIME OVERRIDE -----
+    if market_regime == "BEAR":
+        if "BUY" in base_signal or "ADD" in base_signal:
+            return "🟡 HOLD (Market Bear)"
+        if "PAUSE" in base_signal:
+            return "🔴 REDUCE 33% (Market Bear)"
+
+    return base_signal
 
 # -------------------- UNDERLYING ANALYSIS --------------------
 underlying_trends = {}
@@ -192,7 +223,9 @@ else:
     c3.metric("📉 Income Change", "—")
 
 status = "HEALTHY"
-if drawdown_pct <= -15:
+if market_regime == "BEAR":
+    status = "DEFENSIVE (Market)"
+elif drawdown_pct <= -15:
     status = "DEFENSIVE"
 elif drawdown_pct <= -8:
     status = "CAUTION"
@@ -228,7 +261,7 @@ df = pd.DataFrame(
 st.dataframe(df, use_container_width=True)
 
 # =========================================================
-# 🧭 WEEKLY TRADE GUIDANCE  (NEW — ADDED, NOTHING REMOVED)
+# 🧭 WEEKLY TRADE GUIDANCE
 # =========================================================
 st.subheader("🧭 Weekly Trade Guidance")
 
@@ -407,4 +440,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.6 — capital preservation first, income always.")
+st.caption("v8.7 — market regime aware income strategy with capital preservation priority.")
