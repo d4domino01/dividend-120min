@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import feedparser
 import yfinance as yf
 
 # -------------------- CONFIG --------------------
@@ -26,16 +27,91 @@ if "invested" not in st.session_state:
 if "snapshots" not in st.session_state:
     st.session_state.snapshots = []
 
-# 💰 CASH WALLET
 if "cash_wallet" not in st.session_state:
     st.session_state.cash_wallet = 0.0
 
-# -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v5.5")
-st.caption("Income focus • cash wallet compounding • whole shares only")
+# ---- manual payout tracking (last 4 weeks) ----
+if "payouts" not in st.session_state:
+    st.session_state.payouts = {
+        "QDTE": [0.23, 0.21, 0.24, 0.22],
+        "XDTE": [0.18, 0.17, 0.19, 0.18],
+        "CHPY": [0.55, 0.52, 0.58, 0.54],
+    }
 
-# -------------------- TOP STATUS PANEL --------------------
-st.success("🟢 Strategy Mode: Income-Max + Cash Wallet Enabled")
+# -------------------- ANALYSIS FUNCTIONS --------------------
+def price_trend_signal(ticker):
+    try:
+        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        df["MA50"] = df["Close"].rolling(50).mean()
+        df["MA200"] = df["Close"].rolling(200).mean()
+        last = df.iloc[-1]
+
+        if last["Close"] > last["MA50"] > last["MA200"]:
+            return "STRONG"
+        elif last["Close"] > last["MA200"]:
+            return "WEAK"
+        else:
+            return "DOWN"
+    except:
+        return "UNKNOWN"
+
+
+def payout_signal(ticker):
+    pays = st.session_state.payouts.get(ticker, [])
+    if len(pays) < 4:
+        return "UNKNOWN"
+
+    recent = pays[-1]
+    avg_prev = sum(pays[:-1]) / (len(pays) - 1)
+
+    if recent >= avg_prev * 0.9:
+        return "STABLE"
+    elif recent >= avg_prev * 0.75:
+        return "WARNING"
+    else:
+        return "DROP"
+
+
+def final_signal(price_sig, pay_sig):
+    if price_sig == "DOWN" or pay_sig == "DROP":
+        return "🔴 REVIEW / ROTATE"
+    if price_sig == "WEAK" or pay_sig == "WARNING":
+        return "🟡 HOLD / SLOW"
+    if price_sig == "STRONG" and pay_sig == "STABLE":
+        return "🟢 HOLD / ADD"
+    return "⚪ UNKNOWN"
+
+
+# -------------------- GLOBAL ETF HEALTH --------------------
+signals = {}
+
+for t in st.session_state.etfs:
+    p = price_trend_signal(t)
+    d = payout_signal(t)
+    f = final_signal(p, d)
+    signals[t] = f
+
+if any("🔴" in v for v in signals.values()):
+    overall = "🔴 SOME ETFs AT RISK — REVIEW POSITIONS"
+    level = "error"
+elif any("🟡" in v for v in signals.values()):
+    overall = "🟡 MIXED SIGNALS — SLOW NEW BUYS"
+    level = "warning"
+else:
+    overall = "🟢 ALL ETFs STRONG — NORMAL BUYING OK"
+    level = "success"
+
+# -------------------- TITLE --------------------
+st.title("🔥 Income Strategy Engine v7.0")
+st.caption("Income focus • ETF health monitoring • income protection")
+
+# -------------------- PORTFOLIO HEALTH BANNER --------------------
+if level == "success":
+    st.success(overall)
+elif level == "warning":
+    st.warning(overall)
+else:
+    st.error(overall)
 
 # -------------------- USER INPUTS --------------------
 st.session_state.monthly_add = st.number_input(
@@ -68,6 +144,7 @@ with st.expander("➕ Manage ETFs"):
         with c4:
             if st.button("❌", key=f"d_{t}"):
                 del st.session_state.etfs[t]
+                st.session_state.payouts.pop(t, None)
                 st.rerun()
 
     st.divider()
@@ -78,9 +155,44 @@ with st.expander("➕ Manage ETFs"):
                 "shares": 0,
                 "price": 50,
                 "yield": 0.05,
-                "type": "Growth",
+                "type": "Income",
             }
+            st.session_state.payouts[new_ticker] = []
             st.rerun()
+
+# =========================================================
+# UPDATE DISTRIBUTIONS
+# =========================================================
+with st.expander("✍️ Update Weekly Distributions"):
+
+    st.info("Enter last 4 weekly payouts per share for each ETF.")
+
+    for t in st.session_state.etfs:
+        st.write(f"### {t}")
+        pays = st.session_state.payouts.get(t, [0, 0, 0, 0])
+
+        cols = st.columns(4)
+        new = []
+        for i in range(4):
+            new.append(cols[i].number_input(
+                f"W{i+1}", value=float(pays[i]) if i < len(pays) else 0.0, step=0.01, key=f"p_{t}_{i}"
+            ))
+        st.session_state.payouts[t] = new
+
+# =========================================================
+# ETF STRENGTH MONITOR
+# =========================================================
+with st.expander("📊 ETF Strength Monitor", expanded=True):
+
+    rows = []
+    for t in st.session_state.etfs:
+        p = price_trend_signal(t)
+        d = payout_signal(t)
+        f = final_signal(p, d)
+        rows.append([t, p, d, f])
+
+    df = pd.DataFrame(rows, columns=["ETF", "Price Trend", "Distribution", "Action"])
+    st.dataframe(df, use_container_width=True)
 
 # =========================================================
 # PORTFOLIO SNAPSHOT
@@ -93,16 +205,21 @@ with st.expander("📊 Portfolio Snapshot"):
 
     for t, d in st.session_state.etfs.items():
         value = d["shares"] * d["price"]
-        income = value * d["yield"] / 12
+
+        pays = st.session_state.payouts.get(t, [])
+        avg_weekly = sum(pays) / len(pays) if pays else 0
+        income = avg_weekly * 4.33 * d["shares"]
+
         total_value += value
         monthly_income += income
+
         rows.append([t, d["shares"], f"${d['price']:.2f}", f"${value:,.0f}", f"${income:,.2f}"])
 
     df = pd.DataFrame(rows, columns=["ETF", "Shares", "Price", "Value", "Monthly Income"])
     st.dataframe(df, use_container_width=True)
 
     st.success(f"💼 Portfolio Value: ${total_value:,.0f}")
-    st.success(f"💸 Monthly Income: ${monthly_income:,.2f}")
+    st.success(f"💸 Monthly Income (realistic): ${monthly_income:,.2f}")
 
 # =========================================================
 # WEEKLY ACTION PLAN
@@ -110,64 +227,67 @@ with st.expander("📊 Portfolio Snapshot"):
 with st.expander("📅 Weekly Action Plan"):
 
     weekly_cash = st.session_state.monthly_add / 4
-
     st.write(f"Weekly contribution: **${weekly_cash:,.2f}**")
+
+    strong = [t for t, v in signals.items() if "🟢" in v]
+    weak = [t for t, v in signals.items() if "🔴" in v]
+
+    if strong:
+        st.success(f"Focus new buys on: {', '.join(strong)}")
+    if weak:
+        st.error(f"Avoid adding to: {', '.join(weak)}")
+
     st.write(f"Cash wallet balance: **${st.session_state.cash_wallet:,.2f}**")
 
-    st.write("Strategy:")
-    st.write("- Add weekly cash to wallet")
-    st.write("- Buy highest yield ETF when enough for whole shares")
-    st.write("- No selling during income build phase")
-
-# =========================================================
-# WEEKLY REINVESTMENT OPTIMIZER — CASH WALLET
-# =========================================================
-with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
-
-    income_etfs = {t: d for t, d in st.session_state.etfs.items() if d["type"] == "Income"}
-
-    if not income_etfs:
-        st.warning("No income ETFs selected.")
-    else:
-        weekly_cash = st.session_state.monthly_add / 4
+    if st.button("➕ Add Weekly Cash to Wallet"):
         st.session_state.cash_wallet += weekly_cash
+        st.success("Weekly cash added.")
+        st.rerun()
 
-        best_ticker = max(income_etfs, key=lambda x: income_etfs[x]["yield"])
-        best = income_etfs[best_ticker]
+# =========================================================
+# WEEKLY REINVESTMENT OPTIMIZER
+# =========================================================
+with st.expander("💰 Weekly Reinvestment Optimizer"):
 
-        shares = int(st.session_state.cash_wallet // best["price"])
-        cost = shares * best["price"]
+    buy_list = [t for t, v in signals.items() if "🟢" in v]
 
-        st.write("### 🎯 Income-Max Strategy (Cash Wallet)")
+    if not buy_list:
+        st.warning("No ETFs currently rated safe to add.")
+    else:
+        best = max(buy_list, key=lambda x: st.session_state.etfs[x]["yield"])
+        price = st.session_state.etfs[best]["price"]
 
-        st.success(f"Best yield ETF: **{best_ticker}** ({best['yield']*100:.1f}%)")
+        shares = int(st.session_state.cash_wallet // price)
+        cost = shares * price
+
+        st.success(f"Recommended ETF: **{best}**")
 
         if shares > 0:
-            st.success(f"Buy **{shares} shares** → ${cost:,.2f}")
+            st.write(f"Buy **{shares} shares** → ${cost:,.2f}")
             if st.button("✅ Execute Buy"):
-                st.session_state.etfs[best_ticker]["shares"] += shares
+                st.session_state.etfs[best]["shares"] += shares
                 st.session_state.cash_wallet -= cost
                 st.success("Purchase recorded.")
                 st.rerun()
         else:
             st.info("Not enough wallet cash yet to buy 1 share.")
 
-        st.write(f"💵 Wallet balance after buy: **${st.session_state.cash_wallet:,.2f}**")
-
 # =========================================================
-# ETF NEWS FEED (SAFE)
+# ETF NEWS FEED
 # =========================================================
 with st.expander("📰 ETF News Feed"):
 
     for t in st.session_state.etfs:
         st.markdown(f"### {t}")
+        feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={t}&region=US&lang=en-US"
+
         try:
-            news = yf.Ticker(t).news
-            if not news:
+            feed = feedparser.parse(feed_url)
+            if not feed.entries:
                 st.info("No recent headlines.")
             else:
-                for n in news[:5]:
-                    st.write("•", n.get("title", "No title"))
+                for entry in feed.entries[:5]:
+                    st.write("•", entry.title)
         except:
             st.info("News unavailable.")
 
@@ -201,4 +321,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("Stable income compounding engine — whole shares • cash wallet • news awareness.")
+st.caption("ETF-focused income protection engine — reacts to price + distribution changes.")
