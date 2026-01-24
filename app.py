@@ -34,7 +34,7 @@ if "cash_wallet" not in st.session_state:
 if "last_price_signal" not in st.session_state:
     st.session_state.last_price_signal = {}
 
-# ---- manual payout tracking (last 4 weeks) ----
+# ---- payout history (auto-shift) ----
 if "payouts" not in st.session_state:
     st.session_state.payouts = {
         "QDTE": [0.20, 0.15, 0.11, 0.17],
@@ -54,11 +54,9 @@ def price_trend_signal(ticker):
             high = recent["Close"].max()
             last = recent["Close"].iloc[-1]
 
-            # break below recent support
             if last < low * 1.005:
                 return "WEAK"
 
-            # break above recent resistance
             if last > high * 0.995:
                 return "STRONG"
 
@@ -67,7 +65,6 @@ def price_trend_signal(ticker):
     except:
         pass
 
-    # ----- FALLBACK USING STORED PRICES -----
     try:
         prices = [v["price"] for v in st.session_state.etfs.values()]
         avg_price = sum(prices) / len(prices)
@@ -100,20 +97,16 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-# ✅ CONFIRMATION-BASED ACTION LOGIC
 def final_signal(ticker, price_sig, pay_sig):
 
     last_sig = st.session_state.last_price_signal.get(ticker)
 
-    # second consecutive WEAK = REDUCE
     if price_sig == "WEAK" and last_sig == "WEAK":
         return "🔴 REDUCE 33%"
 
-    # first WEAK = PAUSE
     if price_sig == "WEAK":
         return "🟠 PAUSE"
 
-    # positive cases
     if price_sig == "STRONG":
         return "🟢 BUY"
 
@@ -138,7 +131,6 @@ for t in st.session_state.etfs:
     price_signals[t] = p
     signals[t] = f
 
-# update last signals AFTER calculation
 st.session_state.last_price_signal = price_signals.copy()
 
 if any("🔴" in v for v in signals.values()):
@@ -152,8 +144,8 @@ else:
     level = "success"
 
 # -------------------- TITLE --------------------
-st.title("🔥 Income Strategy Engine v7.7")
-st.caption("Income focus • support-based price protection • confirmation selling")
+st.title("🔥 Income Strategy Engine v7.8")
+st.caption("Income focus • auto-shift payouts • confirmation-based selling")
 
 # -------------------- PORTFOLIO HEALTH BANNER --------------------
 if level == "success":
@@ -211,23 +203,28 @@ with st.expander("➕ Manage ETFs"):
             st.rerun()
 
 # =========================================================
-# UPDATE DISTRIBUTIONS
+# UPDATE DISTRIBUTIONS (AUTO SHIFT)
 # =========================================================
 with st.expander("✍️ Update Weekly Distributions"):
 
-    st.info("Enter last 4 weekly payouts per share for each ETF.")
+    st.info("Enter THIS WEEK’s payout. History auto-shifts (W1←W2←W3←W4←New).")
 
     for t in st.session_state.etfs:
         st.write(f"### {t}")
-        pays = st.session_state.payouts.get(t, [0, 0, 0, 0])
 
-        cols = st.columns(4)
-        new = []
-        for i in range(4):
-            new.append(cols[i].number_input(
-                f"W{i+1}", value=float(pays[i]), step=0.01, key=f"p_{t}_{i}"
-            ))
-        st.session_state.payouts[t] = new
+        new_val = st.number_input(
+            f"This week payout for {t}",
+            min_value=0.0,
+            step=0.01,
+            key=f"newpay_{t}"
+        )
+
+        if st.button(f"Save This Week — {t}", key=f"save_{t}"):
+            old = st.session_state.payouts.get(t, [0, 0, 0, 0])
+            shifted = [old[1], old[2], old[3], new_val]
+            st.session_state.payouts[t] = shifted
+            st.success(f"{t} payout updated.")
+            st.rerun()
 
 # =========================================================
 # ETF STRENGTH MONITOR
@@ -371,4 +368,4 @@ with st.expander("📈 True Return Tracking"):
         st.info("No snapshots saved yet.")
 
 # -------------------- FOOTER --------------------
-st.caption("ETF-focused income protection engine — sells only after confirmed price breakdown.")
+st.caption("ETF-focused income protection engine — payouts auto-shift, selling only after confirmed breakdown.")
