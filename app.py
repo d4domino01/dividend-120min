@@ -1,215 +1,192 @@
-# app.py
-
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import yfinance as yf
-import feedparser
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# -----------------------------
-# DEFAULT ETF SET (weekly payers)
-# -----------------------------
+# -----------------------
+# DEFAULT ETF SET
+# -----------------------
 DEFAULT_ETFS = [
-    {"ticker": "QDTE", "type": "Income", "shares": 110},
-    {"ticker": "CHPY", "type": "Income", "shares": 55},
-    {"ticker": "XDTE", "type": "Income", "shares": 69},
+    {"ticker": "QDTE", "type": "Income", "shares": 0},
+    {"ticker": "CHPY", "type": "Income", "shares": 0},
+    {"ticker": "XDTE", "type": "Income", "shares": 0},
 ]
 
-# -----------------------------
-# SESSION STATE INIT
-# -----------------------------
 if "etfs" not in st.session_state:
     st.session_state.etfs = DEFAULT_ETFS.copy()
 
-if "monthly_add" not in st.session_state:
-    st.session_state.monthly_add = 200
-
-if "total_invested" not in st.session_state:
-    st.session_state.total_invested = 10000
-
-# -----------------------------
-# HELPERS
-# -----------------------------
-@st.cache_data(ttl=1800)
-def get_price_data(ticker):
+# -----------------------
+# SAFE DATA FETCH
+# -----------------------
+@st.cache_data(ttl=900)
+def get_prices(ticker):
     try:
-        df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-        if df.empty:
+        df = yf.download(ticker, period="2mo", interval="1d", progress=False)
+        if df is None or df.empty:
             return None
-        return df["Close"]
+        return df
     except:
         return None
 
-def get_rss_news(ticker):
-    url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
-    feed = feedparser.parse(url)
-    items = []
-    for e in feed.entries[:5]:
-        items.append(e.title)
-    return items
+def get_news(ticker):
+    try:
+        t = yf.Ticker(ticker)
+        news = t.news
+        if not news:
+            return []
+        return [n["title"] for n in news[:5]]
+    except:
+        return []
 
-# -----------------------------
-# MARKET STATUS + NEWS
-# -----------------------------
-st.title("🔥 Income Strategy Engine")
+# -----------------------
+# RISK ENGINE
+# -----------------------
+def analyze_etf(ticker):
+    df = get_prices(ticker)
+    if df is None or len(df) < 10:
+        return None
 
-col1, col2 = st.columns(2)
-with col1:
-    st.session_state.monthly_add = st.number_input(
-        "Monthly cash added ($)", 0, 5000, st.session_state.monthly_add, step=50
-    )
-with col2:
-    st.session_state.total_invested = st.number_input(
-        "Total invested to date ($)", 0, 500000, st.session_state.total_invested, step=500
-    )
+    close = df["Close"]
+    last = float(close.iloc[-1])
 
-st.divider()
+    high30 = float(close[-30:].max()) if len(close) >= 30 else float(close.max())
+    ret7 = (last - float(close.iloc[-8])) / float(close.iloc[-8]) if len(close) >= 8 else 0
 
-st.subheader("🧠 Market + News Status")
+    drop30 = (last - high30) / high30
 
-market_warning = False
-news_risk = False
+    risk = "OK"
+    if drop30 <= -0.20:
+        risk = "HIGH"
+    elif drop30 <= -0.10:
+        risk = "MEDIUM"
 
-spy = get_price_data("SPY")
-if spy is not None and len(spy) > 20:
-    ret30 = (spy.iloc[-1] - spy.iloc[-20]) / spy.iloc[-20]
-    if ret30 < -0.08:
-        market_warning = True
+    return {
+        "last": last,
+        "drop30": drop30,
+        "ret7": ret7,
+        "risk": risk,
+    }
 
-news_headlines = get_rss_news("SPY")
-for h in news_headlines:
-    if any(w in h.lower() for w in ["volatility", "recession", "selloff", "inflation", "rates"]):
-        news_risk = True
+# -----------------------
+# HEADER
+# -----------------------
+st.title("🔥 Income Strategy Engine v5.0")
+st.caption("Weekly income ETFs • crash alerts • rotation guidance")
 
-if market_warning and news_risk:
-    st.error("🔴 CRASH MODE: Market dropping + negative news. Rotate income into growth ETFs.")
-elif market_warning:
-    st.warning("🟠 Market pullback detected. Be cautious with reinvestments.")
-elif news_risk:
-    st.warning("🟡 Market headlines risky. Consider delaying aggressive buys.")
+# -----------------------
+# TOP ALERT BLOCK
+# -----------------------
+alerts = []
+
+for etf in st.session_state.etfs:
+    r = analyze_etf(etf["ticker"])
+    if r and r["risk"] == "HIGH":
+        alerts.append(f"🔴 {etf['ticker']} heavy drop (30d) — consider trimming")
+    elif r and r["risk"] == "MEDIUM":
+        alerts.append(f"🟡 {etf['ticker']} weakening — pause reinvest")
+
+if alerts:
+    st.error("⚠️ ETF Risk Alerts\n\n" + "\n".join(alerts))
 else:
-    st.success("🟢 Market stable. Income strategy safe to continue.")
+    st.success("🟢 No ETF risk detected — income strategy healthy")
 
-# -----------------------------
-# MANAGE ETFS
-# -----------------------------
+# -----------------------
+# PORTFOLIO INPUT
+# -----------------------
 with st.expander("➕ Manage ETFs", expanded=False):
-    new_ticker = st.text_input("Add ETF ticker").upper()
-    new_type = st.selectbox("Type", ["Income", "Growth"])
-    if st.button("Add ETF"):
-        if new_ticker:
-            st.session_state.etfs.append({"ticker": new_ticker, "type": new_type, "shares": 0})
 
     for i, etf in enumerate(st.session_state.etfs):
-        c1, c2, c3 = st.columns([2,2,1])
-        with c1:
+        col1, col2, col3 = st.columns([2,2,1])
+        with col1:
             st.write(etf["ticker"])
-        with c2:
+        with col2:
             etf["shares"] = st.number_input(
-                f"Shares ({etf['ticker']})", 0, 100000, etf["shares"], key=f"s{i}"
+                f"Shares {etf['ticker']}",
+                min_value=0,
+                step=1,
+                value=etf["shares"],
+                key=f"s{i}"
             )
-        with c3:
+        with col3:
             if st.button("❌", key=f"d{i}"):
                 st.session_state.etfs.pop(i)
                 st.rerun()
 
-# -----------------------------
-# PORTFOLIO SNAPSHOT
-# -----------------------------
-with st.expander("📊 Portfolio Snapshot", expanded=True):
+    new_ticker = st.text_input("Add ETF ticker")
+    if st.button("Add ETF"):
+        if new_ticker:
+            st.session_state.etfs.append(
+                {"ticker": new_ticker.upper(), "type": "Income", "shares": 0}
+            )
+            st.rerun()
 
-    rows = []
-    total_value = 0
-    est_income = 0
+# -----------------------
+# ETF RISK TABLE
+# -----------------------
+st.subheader("⚠️ ETF Risk & Payout Stability")
 
-    for etf in st.session_state.etfs:
-        prices = get_price_data(etf["ticker"])
-        price = prices.iloc[-1] if prices is not None else 0
-        value = price * etf["shares"]
-        total_value += value
+rows = []
+for etf in st.session_state.etfs:
+    r = analyze_etf(etf["ticker"])
+    if not r:
+        continue
+    rows.append([
+        etf["ticker"],
+        f"{r['drop30']*100:.1f}%",
+        f"{r['ret7']*100:.1f}%",
+        r["risk"]
+    ])
 
-        # rough income assumptions
-        yield_map = {
-            "QDTE": 0.35,
-            "CHPY": 0.41,
-            "XDTE": 0.30
-        }
-        y = yield_map.get(etf["ticker"], 0.05)
-        income = value * y / 12
-        est_income += income
-
-        rows.append([etf["ticker"], etf["shares"], round(price,2), round(value,0), round(income,0)])
-
-    df = pd.DataFrame(rows, columns=["ETF","Shares","Price","Value","Monthly Income"])
+if rows:
+    df = pd.DataFrame(rows, columns=["ETF", "30d Drop", "7d Momentum", "Risk"])
     st.dataframe(df, use_container_width=True)
+else:
+    st.info("Market data unavailable for risk analysis.")
 
-    st.metric("Portfolio Value", f"${int(total_value):,}")
-    st.metric("Est Monthly Income", f"${int(est_income):,}")
-
-# -----------------------------
-# ETF RISK + PAYOUT STABILITY
-# -----------------------------
-with st.expander("⚠ ETF Risk & Payout Stability", expanded=True):
-
-    risk_found = False
-
-    for etf in st.session_state.etfs:
-        prices = get_price_data(etf["ticker"])
-        if prices is None or len(prices) < 15:
-            continue
-
-        last = prices.iloc[-1]
-        high30 = prices.max()
-        drop30 = (last - high30) / high30
-
-        if drop30 < -0.15:
-            st.error(f"🔴 {etf['ticker']} down {abs(drop30)*100:.1f}% from 30d high")
-            risk_found = True
-        elif drop30 < -0.08:
-            st.warning(f"🟠 {etf['ticker']} mild pullback {abs(drop30)*100:.1f}%")
-
-    if not risk_found:
-        st.success("🟢 No ETF payout risk detected.")
-
-# -----------------------------
+# -----------------------
 # WEEKLY ACTION PLAN
-# -----------------------------
-with st.expander("📅 Weekly Action Plan", expanded=True):
+# -----------------------
+st.subheader("📅 Weekly Action Plan")
 
-    scores = []
+actions = []
 
-    for etf in st.session_state.etfs:
-        prices = get_price_data(etf["ticker"])
-        if prices is None or len(prices) < 10:
-            continue
+for etf in st.session_state.etfs:
+    r = analyze_etf(etf["ticker"])
+    if not r:
+        continue
 
-        ret10 = (prices.iloc[-1] - prices.iloc[-10]) / prices.iloc[-10]
-        vol = prices.pct_change().std()
-
-        score = ret10 - vol
-        scores.append((etf["ticker"], score))
-
-    if scores:
-        best = sorted(scores, key=lambda x: x[1], reverse=True)[0][0]
-        st.success(f"✅ Best ETF to reinvest into this week: **{best}**")
+    if r["risk"] == "HIGH":
+        actions.append(f"🔴 Reduce exposure to {etf['ticker']}")
+    elif r["risk"] == "MEDIUM":
+        actions.append(f"🟡 Pause reinvestment into {etf['ticker']}")
     else:
-        st.info("Not enough data for optimizer this week.")
+        actions.append(f"🟢 Continue buying {etf['ticker']}")
 
-    if news_risk:
-        st.warning("📰 News risk elevated — consider waiting before large buys.")
+if actions:
+    for a in actions:
+        st.write(a)
+else:
+    st.info("No actions needed this week.")
 
-# -----------------------------
-# ETF NEWS TICKERS
-# -----------------------------
-with st.expander("📰 ETF News Feed", expanded=False):
-    for etf in st.session_state.etfs:
-        st.markdown(f"### {etf['ticker']} News")
-        news = get_rss_news(etf["ticker"])
-        if news:
-            for h in news:
-                st.write("•", h)
-        else:
+# -----------------------
+# NEWS SECTION
+# -----------------------
+st.subheader("📰 ETF News")
+
+for etf in st.session_state.etfs:
+    with st.expander(etf["ticker"]):
+        news = get_news(etf["ticker"])
+        if not news:
             st.write("No recent headlines.")
+        else:
+            for n in news:
+                st.write("•", n)
+
+# -----------------------
+# NEXT PHASE NOTE
+# -----------------------
+st.divider()
+st.caption("Next upgrades: dividend cut detector • auto allocation optimizer • crash rotation math")
