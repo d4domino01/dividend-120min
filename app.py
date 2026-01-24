@@ -39,6 +39,10 @@ if "cash_wallet" not in st.session_state:
 if "last_price_signal" not in st.session_state:
     st.session_state.last_price_signal = {}
 
+# income tracking for shock alerts
+if "last_income_snapshot" not in st.session_state:
+    st.session_state.last_income_snapshot = None
+
 if "payouts" not in st.session_state:
     st.session_state.payouts = {
         "QDTE": [0.20, 0.15, 0.11, 0.17],
@@ -163,8 +167,8 @@ for t in st.session_state.etfs:
 st.session_state.last_price_signal = price_signals.copy()
 
 # -------------------- HEADER --------------------
-st.title("🔥 Income Strategy Engine v8.2")
-st.caption("Balanced dashboard • underlying-first strategy model")
+st.title("🔥 Income Strategy Engine v8.3")
+st.caption("Balanced dashboard • underlying-first model • income shock protection")
 
 # -------------------- HEALTH BANNER --------------------
 if any("🔴" in v for v in signals.values()):
@@ -213,6 +217,41 @@ if reduce:
     st.error(f"🔴 Reduce: {', '.join(reduce)}")
 if not (buy or pause or reduce):
     st.info("No actions required this week.")
+
+# =========================================================
+# 🚨 PORTFOLIO INCOME SHOCK MONITOR (NEW)
+# =========================================================
+
+st.subheader("🚨 Income Shock Monitor")
+
+current_monthly_income = 0
+
+for t, d in st.session_state.etfs.items():
+    pays = st.session_state.payouts.get(t, [])
+    avg_weekly = sum(pays) / len(pays) if pays else 0
+    current_monthly_income += avg_weekly * 4.33 * d["shares"]
+
+last_income = st.session_state.last_income_snapshot
+
+if last_income:
+    change_pct = (current_monthly_income - last_income) / last_income * 100
+
+    st.write(f"Last recorded income: **${last_income:,.2f}**")
+    st.write(f"Current estimated income: **${current_monthly_income:,.2f}**")
+    st.write(f"Change: **{change_pct:.1f}%**")
+
+    if change_pct <= -20:
+        st.error("🔴 CRITICAL: Income dropped more than 20% — DEFENSIVE MODE RECOMMENDED")
+    elif change_pct <= -10:
+        st.warning("🟠 WARNING: Income dropped more than 10% — monitor closely")
+    else:
+        st.success("🟢 Income stable vs last snapshot")
+else:
+    st.info("No income baseline saved yet.")
+
+if st.button("📌 Save Income Baseline"):
+    st.session_state.last_income_snapshot = round(current_monthly_income, 2)
+    st.success("Income baseline saved.")
 
 # =========================================================
 # 💰 INCOME & PORTFOLIO
@@ -363,4 +402,4 @@ with st.expander("🧠 Strategy Tools"):
     st.info("Growth phase not yet active — income target not reached.")
 
 # -------------------- FOOTER --------------------
-st.caption("Balanced dashboard layout — fast signals first, tools grouped logically.")
+st.caption("Capital preservation focused income engine — now with portfolio income shock alerts.")
