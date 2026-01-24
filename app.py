@@ -33,9 +33,9 @@ if "cash_wallet" not in st.session_state:
 # ---- manual payout tracking (last 4 weeks) ----
 if "payouts" not in st.session_state:
     st.session_state.payouts = {
-        "QDTE": [0.17, 0.11, 0.15, 0.20],
-        "XDTE": [0.16, 0.11, 0.16, 0.20],
-        "CHPY": [0.52, 0.51, 0.50, 0.44],
+        "QDTE": [0.20, 0.15, 0.11, 0.17],
+        "XDTE": [0.20, 0.16, 0.11, 0.16],
+        "CHPY": [0.44, 0.50, 0.51, 0.52],
     }
 
 # -------------------- ANALYSIS FUNCTIONS --------------------
