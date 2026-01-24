@@ -1,126 +1,142 @@
 import streamlit as st
-import pandas as pd
 
-st.set_page_config(page_title="Income Strategy Engine", layout="centered")
+st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# -------------------- SAFE MODE --------------------
-SAFE_MODE = True
-
-# -------------------- SESSION STATE INIT --------------------
-if "etfs" not in st.session_state:
-    st.session_state.etfs = [
-        {"ticker": "QDTE", "shares": 0, "type": "Income"},
-        {"ticker": "CHPY", "shares": 0, "type": "Income"},
-        {"ticker": "XDTE", "shares": 0, "type": "Income"},
-    ]
-
+# ----------------------------
+# SESSION STATE INIT
+# ----------------------------
 if "monthly_add" not in st.session_state:
     st.session_state.monthly_add = 200
 
 if "total_invested" not in st.session_state:
     st.session_state.total_invested = 10000
 
+if "etfs" not in st.session_state:
+    st.session_state.etfs = {
+        "QDTE": {"shares": 0, "type": "Income", "yield": 0.30, "price": 30.72},
+        "CHPY": {"shares": 0, "type": "Income", "yield": 0.41, "price": 60.43},
+        "XDTE": {"shares": 0, "type": "Income", "yield": 0.25, "price": 39.75},
+    }
 
-# -------------------- HEADER --------------------
-st.title("🔥 Income Strategy Engine v5.2")
+# ----------------------------
+# HEADER
+# ----------------------------
+st.markdown("# 🔥 Strategy Engine v5.3")
 st.caption("Income focus • reinvest optimization • no forced selling")
 
-# -------------------- TOP WARNING BLOCK --------------------
-st.success("No payout risk detected. Market monitoring stable.")
+# ----------------------------
+# TOP WARNING PANEL (SAFE MODE)
+# ----------------------------
+st.success("🟢 System stable — income strategy running normally.")
 
-# -------------------- CAPITAL INPUTS --------------------
+# ----------------------------
+# USER INPUTS
+# ----------------------------
 st.session_state.monthly_add = st.number_input(
-    "Monthly cash added ($)",
-    min_value=0,
-    step=50,
-    value=st.session_state.monthly_add,
+    "Monthly cash added ($)", min_value=0, step=50, value=st.session_state.monthly_add
 )
 
 st.session_state.total_invested = st.number_input(
-    "Total invested to date ($)",
-    min_value=0,
-    step=500,
-    value=st.session_state.total_invested,
+    "Total invested to date ($)", min_value=0, step=500, value=st.session_state.total_invested
 )
 
-# -------------------- MANAGE ETFs --------------------
+# ----------------------------
+# MANAGE ETFs
+# ----------------------------
 with st.expander("➕ Manage ETFs", expanded=False):
+    for t in list(st.session_state.etfs.keys()):
+        col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
 
-    new_ticker = st.text_input("Add ETF ticker").upper()
-    if st.button("Add ETF"):
-        if new_ticker and new_ticker not in [e["ticker"] for e in st.session_state.etfs]:
-            st.session_state.etfs.append(
-                {"ticker": new_ticker, "shares": 0, "type": "Income"}
+        with col1:
+            st.write(t)
+
+        with col2:
+            st.session_state.etfs[t]["shares"] = st.number_input(
+                "Shares",
+                min_value=0,
+                step=1,
+                value=st.session_state.etfs[t]["shares"],
+                key=f"{t}_shares",
             )
-            st.experimental_rerun()
 
-    for i, etf in enumerate(st.session_state.etfs):
-        st.markdown(f"### {etf['ticker']}")
+        with col3:
+            st.session_state.etfs[t]["type"] = st.selectbox(
+                "Type", ["Income", "Growth"],
+                index=0 if st.session_state.etfs[t]["type"] == "Income" else 1,
+                key=f"{t}_type",
+            )
 
-        col1, col2 = st.columns(2)
+        with col4:
+            if st.button("❌", key=f"del_{t}"):
+                del st.session_state.etfs[t]
+                st.experimental_rerun()
 
-        etf["shares"] = col1.number_input(
-            "Shares",
-            min_value=0,
-            value=etf["shares"],
-            key=f"shares_{i}",
-        )
-
-        etf["type"] = col2.selectbox(
-            "Type",
-            ["Income", "Growth"],
-            index=0 if etf["type"] == "Income" else 1,
-            key=f"type_{i}",
-        )
-
-        if st.button("❌ Remove", key=f"remove_{i}"):
-            st.session_state.etfs.pop(i)
-            st.experimental_rerun()
-
-# -------------------- PORTFOLIO SNAPSHOT --------------------
+# ----------------------------
+# PORTFOLIO SNAPSHOT
+# ----------------------------
 with st.expander("📊 Portfolio Snapshot", expanded=False):
 
-    if len(st.session_state.etfs) == 0:
-        st.info("No ETFs in portfolio.")
-    else:
-        df = pd.DataFrame(st.session_state.etfs)
-        st.dataframe(df, use_container_width=True)
+    total_value = 0
+    total_monthly_income = 0
 
-# -------------------- ETF RISK & PAYOUT --------------------
+    for t, d in st.session_state.etfs.items():
+        value = d["shares"] * d["price"]
+        monthly_income = value * d["yield"] / 12
+
+        total_value += value
+        total_monthly_income += monthly_income
+
+        st.write(
+            f"**{t}** — ${value:,.0f} | Est Monthly: ${monthly_income:,.2f}"
+        )
+
+    st.divider()
+    st.write(f"### Total Portfolio Value: ${total_value:,.0f}")
+    st.write(f"### Est Monthly Income: ${total_monthly_income:,.2f}")
+
+# ----------------------------
+# ETF RISK & PAYOUT STABILITY
+# ----------------------------
 with st.expander("⚠️ ETF Risk & Payout Stability", expanded=False):
 
-    for etf in st.session_state.etfs:
-        st.info(f"{etf['ticker']}: Market analysis paused (safe mode)")
+    for t in st.session_state.etfs:
+        st.info(f"{t}: Market analysis paused (safe mode)")
 
-# -------------------- WEEKLY ACTION PLAN --------------------
-with st.expander("📅 Weekly Action Plan", expanded=False):
+# ----------------------------
+# WEIGHTED REINVESTMENT OPTIMIZER
+# ----------------------------
+with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
 
-    income_etfs = [e for e in st.session_state.etfs if e["type"] == "Income"]
+    income_etfs = {t: d for t, d in st.session_state.etfs.items() if d["type"] == "Income"}
 
     if len(income_etfs) == 0:
         st.warning("No income ETFs selected.")
     else:
-        st.markdown("**This week’s focus:**")
-        st.markdown("- Reinvest distributions into highest yield ETF")
-        st.markdown("- Do not sell unless payout is cut")
-        st.markdown("- Maintain income allocation")
+        total_yield = sum(d["yield"] for d in income_etfs.values())
 
-# -------------------- AFTER $1K STRATEGY SIM --------------------
+        st.write("### Suggested allocation of new money:")
+
+        weekly_cash = st.session_state.monthly_add / 4
+
+        for t, d in income_etfs.items():
+            weight = d["yield"] / total_yield
+            alloc = weekly_cash * weight
+            shares = alloc / d["price"]
+
+            st.success(
+                f"{t}: ${alloc:,.2f} → {shares:.2f} shares"
+            )
+
+# ----------------------------
+# AFTER $1K STRATEGY SIMULATOR (PLACEHOLDER)
+# ----------------------------
 with st.expander("🔁 After $1k Strategy Simulator", expanded=False):
+    st.info("Rotation logic activates once $1,000/month income is reached.")
 
-    st.markdown("Simulation placeholder (safe mode)")
-    st.markdown("Once monthly income exceeds $1k:")
-    st.markdown("- 50% continue into income ETFs")
-    st.markdown("- 50% redirected to growth ETFs")
-
-# -------------------- TRUE RETURN TRACKING --------------------
+# ----------------------------
+# TRUE RETURN TRACKING (PLACEHOLDER)
+# ----------------------------
 with st.expander("📈 True Return Tracking", expanded=False):
+    st.info("Will track price + income once market data is enabled.")
 
-    st.markdown("Tracking engine paused (safe mode)")
-    st.markdown("Will calculate:")
-    st.markdown("- Total invested")
-    st.markdown("- Total income received")
-    st.markdown("- True ROI including distributions")
-
-# -------------------- FOOTER --------------------
-st.caption("Stable core version — analytics will be re-enabled safely.")
+st.caption("Stable core version — analytics will be re-enabled step by step.")
