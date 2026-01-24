@@ -1,142 +1,181 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime
 
-st.set_page_config(page_title="Income Strategy Engine", layout="wide")
+# -------------------- CONFIG --------------------
+st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 
-# ----------------------------
-# SESSION STATE INIT
-# ----------------------------
+# -------------------- DEFAULT DATA --------------------
+DEFAULT_ETFS = {
+    "QDTE": {"shares": 0, "price": 30.72, "yield": 0.30, "type": "Income"},
+    "CHPY": {"shares": 0, "price": 60.43, "yield": 0.41, "type": "Income"},
+    "XDTE": {"shares": 0, "price": 39.75, "yield": 0.28, "type": "Income"},
+}
+
+# -------------------- SESSION STATE --------------------
+if "etfs" not in st.session_state:
+    st.session_state.etfs = DEFAULT_ETFS.copy()
+
 if "monthly_add" not in st.session_state:
     st.session_state.monthly_add = 200
 
-if "total_invested" not in st.session_state:
-    st.session_state.total_invested = 10000
+if "invested" not in st.session_state:
+    st.session_state.invested = 10000
 
-if "etfs" not in st.session_state:
-    st.session_state.etfs = {
-        "QDTE": {"shares": 0, "type": "Income", "yield": 0.30, "price": 30.72},
-        "CHPY": {"shares": 0, "type": "Income", "yield": 0.41, "price": 60.43},
-        "XDTE": {"shares": 0, "type": "Income", "yield": 0.25, "price": 39.75},
-    }
+if "snapshots" not in st.session_state:
+    st.session_state.snapshots = []
 
-# ----------------------------
-# HEADER
-# ----------------------------
-st.markdown("# 🔥 Strategy Engine v5.3")
+# -------------------- TITLE --------------------
+st.title("🔥 Income Strategy Engine v5.2")
 st.caption("Income focus • reinvest optimization • no forced selling")
 
-# ----------------------------
-# TOP WARNING PANEL (SAFE MODE)
-# ----------------------------
-st.success("🟢 System stable — income strategy running normally.")
+# -------------------- TOP WARNING PANEL --------------------
+st.success("🟢 System Stable — no ETF payout risk detected.")
 
-# ----------------------------
-# USER INPUTS
-# ----------------------------
+# -------------------- USER INPUTS --------------------
 st.session_state.monthly_add = st.number_input(
-    "Monthly cash added ($)", min_value=0, step=50, value=st.session_state.monthly_add
+    "Monthly cash added ($)", min_value=0, value=st.session_state.monthly_add, step=50
 )
 
-st.session_state.total_invested = st.number_input(
-    "Total invested to date ($)", min_value=0, step=500, value=st.session_state.total_invested
+st.session_state.invested = st.number_input(
+    "Total invested to date ($)", min_value=0, value=st.session_state.invested, step=500
 )
 
-# ----------------------------
-# MANAGE ETFs
-# ----------------------------
-with st.expander("➕ Manage ETFs", expanded=False):
+# =========================================================
+# MANAGE ETFS
+# =========================================================
+with st.expander("➕ Manage ETFs"):
+
     for t in list(st.session_state.etfs.keys()):
-        col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-
-        with col1:
-            st.write(t)
-
-        with col2:
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+        with c1:
+            st.write(f"**{t}**")
+        with c2:
             st.session_state.etfs[t]["shares"] = st.number_input(
-                "Shares",
-                min_value=0,
-                step=1,
-                value=st.session_state.etfs[t]["shares"],
-                key=f"{t}_shares",
+                f"{t} shares", min_value=0, value=st.session_state.etfs[t]["shares"], key=f"s_{t}"
             )
-
-        with col3:
+        with c3:
             st.session_state.etfs[t]["type"] = st.selectbox(
-                "Type", ["Income", "Growth"],
-                index=0 if st.session_state.etfs[t]["type"] == "Income" else 1,
-                key=f"{t}_type",
+                "Type", ["Income", "Growth"], index=0 if st.session_state.etfs[t]["type"] == "Income" else 1, key=f"t_{t}"
             )
-
-        with col4:
-            if st.button("❌", key=f"del_{t}"):
+        with c4:
+            if st.button("❌", key=f"d_{t}"):
                 del st.session_state.etfs[t]
-                st.experimental_rerun()
+                st.rerun()
 
-# ----------------------------
+    st.divider()
+    new_ticker = st.text_input("Add ETF ticker")
+    if st.button("Add ETF"):
+        if new_ticker and new_ticker not in st.session_state.etfs:
+            st.session_state.etfs[new_ticker] = {
+                "shares": 0,
+                "price": 50,
+                "yield": 0.05,
+                "type": "Growth",
+            }
+            st.rerun()
+
+# =========================================================
 # PORTFOLIO SNAPSHOT
-# ----------------------------
-with st.expander("📊 Portfolio Snapshot", expanded=False):
+# =========================================================
+with st.expander("📊 Portfolio Snapshot"):
 
+    rows = []
     total_value = 0
-    total_monthly_income = 0
+    monthly_income = 0
 
     for t, d in st.session_state.etfs.items():
         value = d["shares"] * d["price"]
-        monthly_income = value * d["yield"] / 12
-
+        income = value * d["yield"] / 12
         total_value += value
-        total_monthly_income += monthly_income
+        monthly_income += income
+        rows.append([t, d["shares"], f"${d['price']:.2f}", f"${value:,.0f}", f"${income:,.2f}"])
 
-        st.write(
-            f"**{t}** — ${value:,.0f} | Est Monthly: ${monthly_income:,.2f}"
-        )
+    df = pd.DataFrame(rows, columns=["ETF", "Shares", "Price", "Value", "Monthly Income"])
+    st.dataframe(df, use_container_width=True)
 
-    st.divider()
-    st.write(f"### Total Portfolio Value: ${total_value:,.0f}")
-    st.write(f"### Est Monthly Income: ${total_monthly_income:,.2f}")
+    st.success(f"💼 Portfolio Value: ${total_value:,.0f}")
+    st.success(f"💸 Monthly Income: ${monthly_income:,.2f}")
 
-# ----------------------------
-# ETF RISK & PAYOUT STABILITY
-# ----------------------------
-with st.expander("⚠️ ETF Risk & Payout Stability", expanded=False):
+# =========================================================
+# ETF RISK & PAYOUT STABILITY (SAFE MODE)
+# =========================================================
+with st.expander("⚠️ ETF Risk & Payout Stability"):
 
-    for t in st.session_state.etfs:
-        st.info(f"{t}: Market analysis paused (safe mode)")
+    for t, d in st.session_state.etfs.items():
+        if d["type"] == "Income":
+            st.info(f"{t}: Market analysis paused (safe mode)")
 
-# ----------------------------
-# WEIGHTED REINVESTMENT OPTIMIZER
-# ----------------------------
+# =========================================================
+# WEEKLY ACTION PLAN
+# =========================================================
+with st.expander("📅 Weekly Action Plan"):
+
+    weekly_cash = st.session_state.monthly_add / 4
+    st.write(f"Weekly cash available: **${weekly_cash:,.2f}**")
+
+    st.write("Focus on highest yield ETF unless price becomes extreme.")
+
+# =========================================================
+# WEEKLY REINVESTMENT OPTIMIZER (WHOLE SHARES)
+# =========================================================
 with st.expander("💰 Weekly Reinvestment Optimizer", expanded=True):
 
     income_etfs = {t: d for t, d in st.session_state.etfs.items() if d["type"] == "Income"}
 
-    if len(income_etfs) == 0:
+    if not income_etfs:
         st.warning("No income ETFs selected.")
     else:
         total_yield = sum(d["yield"] for d in income_etfs.values())
-
-        st.write("### Suggested allocation of new money:")
-
         weekly_cash = st.session_state.monthly_add / 4
+        remaining = weekly_cash
+
+        st.write("### Suggested buys (whole shares only)")
+
+        plan = []
 
         for t, d in income_etfs.items():
             weight = d["yield"] / total_yield
             alloc = weekly_cash * weight
-            shares = alloc / d["price"]
+            shares = int(alloc // d["price"])
+            cost = shares * d["price"]
+            remaining -= cost
+            plan.append((t, shares, cost))
 
-            st.success(
-                f"{t}: ${alloc:,.2f} → {shares:.2f} shares"
-            )
+        for t, s, c in plan:
+            if s > 0:
+                st.success(f"{t}: Buy **{s} shares** → ${c:,.2f}")
+            else:
+                st.info(f"{t}: Not enough cash for 1 share")
 
-# ----------------------------
-# AFTER $1K STRATEGY SIMULATOR (PLACEHOLDER)
-# ----------------------------
-with st.expander("🔁 After $1k Strategy Simulator", expanded=False):
-    st.info("Rotation logic activates once $1,000/month income is reached.")
+        st.divider()
+        st.write(f"💵 Cash left over: **${remaining:,.2f}**")
 
-# ----------------------------
-# TRUE RETURN TRACKING (PLACEHOLDER)
-# ----------------------------
-with st.expander("📈 True Return Tracking", expanded=False):
-    st.info("Will track price + income once market data is enabled.")
+# =========================================================
+# AFTER $1K STRATEGY SIMULATOR
+# =========================================================
+with st.expander("🔁 After $1k Strategy Simulator"):
 
-st.caption("Stable core version — analytics will be re-enabled step by step.")
+    st.write("When monthly income reaches $1,000:")
+    st.write("- 50% reinvest into income ETFs")
+    st.write("- 50% shift to growth ETFs")
+
+    st.info("Growth phase not yet active — income target not reached.")
+
+# =========================================================
+# TRUE RETURN TRACKING
+# =========================================================
+with st.expander("📈 True Return Tracking"):
+
+    if st.button("Save Snapshot"):
+        st.session_state.snapshots.append({
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "invested": st.session_state.invested,
+            "portfolio_value": sum(d["shares"] * d["price"] for d in st.session_state.etfs.values()),
+        })
+
+    if st.session_state.snapshots:
+        df = pd.DataFrame(st.session_state.snapshots)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No snapshots saved yet.")
