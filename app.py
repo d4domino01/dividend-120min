@@ -22,7 +22,7 @@ if "monthly_add" not in st.session_state:
     st.session_state.monthly_add = 200
 
 if "invested" not in st.session_state:
-    st.session_state.invested = 10000
+    st.session_state.invested = 11000
 
 if "snapshots" not in st.session_state:
     st.session_state.snapshots = []
