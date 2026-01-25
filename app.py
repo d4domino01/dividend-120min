@@ -216,47 +216,6 @@ save_to_browser({
 })
 
 # ===================================================
-# ================= WARNINGS & RISK =================
-# ===================================================
-
-with st.expander("🚨 Warnings & Risk"):
-
-    warnings_found = False
-    income_drop_map = {}
-
-    for _, r in df.iterrows():
-        if r["Trend"] == "Down":
-            st.warning(f"{r['Ticker']}: Downtrend detected.")
-            warnings_found = True
-        if r["Drawdown %"] >= 10:
-            st.error(f"{r['Ticker']}: Price drawdown {r['Drawdown %']}% from recent high.")
-            warnings_found = True
-        elif r["Drawdown %"] >= 6:
-            st.warning(f"{r['Ticker']}: Price down {r['Drawdown %']}% from recent high.")
-            warnings_found = True
-        if r["Premium Regime"] == "Low Premium":
-            st.warning(f"{r['Ticker']}: Option premium regime weakening.")
-
-    snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
-
-    if snap_files:
-        old = pd.read_csv(snap_files[-1])
-        merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
-
-        merged["Income Drop %"] = (
-            (merged["Annual Income_Old"] - merged["Annual Income_Now"])
-            / merged["Annual Income_Old"].replace(0, 1)
-        ) * 100
-
-        for _, r in merged.iterrows():
-            income_drop_map[r["Ticker"]] = r["Income Drop %"]
-            if r["Income Drop %"] > 5:
-                st.warning(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% since last snapshot.")
-
-    if not warnings_found:
-        st.success("✅ No immediate capital risks detected.")
-
-# ===================================================
 # ========== MARKET STRESS — PHASE 1 =================
 # ===================================================
 
@@ -324,42 +283,62 @@ with st.expander("📉 Market Stress & Early Warnings"):
                 st.caption(msg)
 
         stress_scores[etf] = stress_score
-
         st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
-
-        if stress_score >= 60:
-            st.error("🔴 High risk environment — protect capital")
-        elif stress_score >= 30:
-            st.warning("🟡 Elevated risk — be cautious adding")
-        else:
-            st.success("🟢 Market behavior stable")
-
         st.divider()
 
 # ===================================================
-# ========== PHASE 3 + 4 + 5 — ACTION ENGINE =========
+# ========== PHASE 6 — ALLOCATION OPTIMIZER ==========
 # ===================================================
 
-with st.expander("🧠 Strategy Signals (Phase 3+4+5)"):
+with st.expander("🎯 Allocation Optimizer (Phase 6)"):
+
+    scores = {}
 
     for etf in ETF_LIST:
         trend = df[df.Ticker == etf]["Trend"].iloc[0]
         stress = stress_scores.get(etf, 0)
-        income_drop = income_drop_map.get(etf, 0)
         drawdown = drawdown_map.get(etf, 0)
         regime = vol_regime_map.get(etf, "Normal")
 
-        # 🔴 SELL: capital damage + pressure
-        if drawdown >= 10 and (stress >= 30 or trend == "Down"):
-            st.error(f"{etf}: 🔴 SELL / REDUCE — capital erosion detected")
+        score = 0
 
-        # 🟡 HOLD: weak regime or rising risk
-        elif drawdown >= 6 or stress >= 30 or trend == "Down" or regime == "Low Premium":
-            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — option premium or price pressure")
+        if trend == "Up":
+            score += 30
+        if drawdown < 6:
+            score += 25
+        if stress < 30:
+            score += 25
+        if regime in ["Normal", "High Premium"]:
+            score += 20
 
-        # 🟢 ACCUMULATE: healthy environment
+        scores[etf] = score
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    st.subheader("ETF Allocation Ranking")
+    for etf, sc in ranked:
+        st.write(f"**{etf}** → Score: {sc}/100")
+
+    st.divider()
+
+    if st.session_state.cash > 0:
+        best_etf = ranked[0][0]
+        best_price = df[df.Ticker == best_etf]["Price"].iloc[0]
+
+        if best_price and best_price > 0:
+            shares = int(st.session_state.cash // best_price)
+
+            if shares > 0:
+                st.success(
+                    f"💡 Best use of cash → Buy **{shares} shares of {best_etf}** "
+                    f"(${best_price} each)"
+                )
+            else:
+                st.warning("Not enough cash to buy 1 full share of any ETF.")
         else:
-            st.success(f"{etf}: 🟢 ACCUMULATE — strong income regime")
+            st.warning("Price data unavailable.")
+    else:
+        st.info("Add cash to receive allocation suggestions.")
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -417,4 +396,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v15.0 • Phase-5 option premium regime detection • capital-first income strategy")
+st.caption("v16.0 • Phase-6 allocation optimizer • cash deployed where income probability is highest")
