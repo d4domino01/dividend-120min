@@ -171,29 +171,13 @@ save_to_browser({
 })
 
 # ===================================================
-# ================= REQUIRED ACTIONS =================
-# ===================================================
-
-with st.expander("⚠️ Required Actions"):
-
-    # Phase-3 Action Logic
-    action_map = {}
-
-    for _, r in df.iterrows():
-        action = "ACCUMULATE"
-
-        if r["Trend"] == "Down":
-            action = "HOLD"
-
-        action_map[r["Ticker"]] = action
-
-# ===================================================
 # ================= WARNINGS & RISK =================
 # ===================================================
 
 with st.expander("🚨 Warnings & Risk"):
 
     warnings_found = False
+    income_drop_map = {}
 
     for _, r in df.iterrows():
         if r["Weekly Div"] == 0:
@@ -204,10 +188,9 @@ with st.expander("🚨 Warnings & Risk"):
             warnings_found = True
 
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
-    income_drop_map = {}
 
     if snap_files:
-        old = pd.read_csv(snap_files[0])
+        old = pd.read_csv(snap_files[-1])  # most recent snapshot
         merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
 
         merged["Income Drop %"] = (
@@ -217,11 +200,13 @@ with st.expander("🚨 Warnings & Risk"):
 
         for _, r in merged.iterrows():
             income_drop_map[r["Ticker"]] = r["Income Drop %"]
+
             if r["Income Drop %"] > 5:
-                st.error(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% vs history.")
+                st.warning(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% since last snapshot.")
                 warnings_found = True
+
             if r["Weekly Div_Now"] < r["Weekly Div_Old"]:
-                st.error(f"{r['Ticker']}: Weekly distribution cut detected.")
+                st.warning(f"{r['Ticker']}: Weekly distribution lower than last snapshot.")
                 warnings_found = True
 
     if not warnings_found:
@@ -308,7 +293,7 @@ with st.expander("📉 Market Stress & Early Warnings"):
         st.divider()
 
 # ===================================================
-# ========== PHASE 3 — ACTION ENGINE =================
+# ========== PHASE 3 — ACTION ENGINE (WEEKLY ETFs) ===
 # ===================================================
 
 with st.expander("🧠 Strategy Signals (Phase 3)"):
@@ -318,12 +303,18 @@ with st.expander("🧠 Strategy Signals (Phase 3)"):
         stress = stress_scores.get(etf, 0)
         income_drop = income_drop_map.get(etf, 0)
 
-        if stress >= 60 or income_drop > 8:
-            st.error(f"{etf}: 🔴 SELL / REDUCE — high risk & income instability")
-        elif stress >= 30 or trend == "Down":
-            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — wait for stability")
+        # ---- WEEKLY ETF LOGIC ----
+        # SELL only if market stress is HIGH and trend is DOWN
+        if stress >= 60 and trend == "Down":
+            st.error(f"{etf}: 🔴 SELL / REDUCE — sustained market stress + downtrend")
+
+        # HOLD if moderate stress, downtrend, or income weakening
+        elif stress >= 30 or trend == "Down" or income_drop > 5:
+            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — weekly income volatility or market pressure")
+
+        # Otherwise accumulate
         else:
-            st.success(f"{etf}: 🟢 ACCUMULATE — conditions acceptable")
+            st.success(f"{etf}: 🟢 ACCUMULATE — normal weekly fluctuations, trend acceptable")
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -381,4 +372,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v13.0 • Phase-1 stress detection + Phase-3 strategy signals • auto SELL / HOLD / BUY guidance")
+st.caption("v13.2 • Phase-3 adjusted for WEEKLY income ETFs • no panic selling on normal dividend changes")
