@@ -9,14 +9,18 @@ st.set_page_config(page_title="Income Engine", layout="centered")
 st.markdown("## 📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
+# ================= DEFAULT ETFS =================
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
+    st.session_state.holdings = {
+        t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST
+    }
 
 if "cash" not in st.session_state:
     st.session_state.cash = 0.0
 
+# ================= DATA =================
 @st.cache_data(ttl=900)
 def get_price(ticker):
     try:
@@ -50,6 +54,7 @@ def get_news(ticker):
     except:
         return []
 
+# ================= BUILD DATA =================
 rows = []
 
 for t in ETF_LIST:
@@ -82,6 +87,7 @@ total_value = df["Value"].sum() + st.session_state.cash
 total_annual_income = df["Annual Income"].sum()
 total_monthly_income = total_annual_income / 12
 
+# ================= MARKET CONDITION =================
 down = (df["Trend"] == "Down").sum()
 
 if down >= 2:
@@ -95,6 +101,10 @@ st.markdown(
     f"<div style='padding:10px;border-radius:8px;background:#111'><b>🌍 Market Condition:</b> {market}</div>",
     unsafe_allow_html=True,
 )
+
+# ===================================================
+# =================== PORTFOLIO =====================
+# ===================================================
 
 with st.expander("📁 Portfolio", expanded=True):
 
@@ -110,13 +120,16 @@ with st.expander("📁 Portfolio", expanded=True):
 
         with c2:
             st.session_state.holdings[t]["weekly_div"] = st.number_input(
-                "Weekly Distribution ($)", min_value=0.0, step=0.01,
+                "Weekly Distribution ($)",
+                min_value=0.0, step=0.01,
                 value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
             )
 
         r = df[df.Ticker == t].iloc[0]
         st.caption(f"Price: ${r.Price} | Auto div: {r['Auto Div']}")
-        st.caption(f"Value: ${r.Value:.2f} | Annual: ${r['Annual Income']:.2f} | Monthly: ${r['Monthly Income']:.2f}")
+        st.caption(
+            f"Value: ${r.Value:.2f} | Annual: ${r['Annual Income']:.2f} | Monthly: ${r['Monthly Income']:.2f}"
+        )
         st.divider()
 
     c1, c2, c3 = st.columns(3)
@@ -127,7 +140,13 @@ with st.expander("📁 Portfolio", expanded=True):
     with c3:
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
-    st.session_state.cash = st.number_input("💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash)
+    st.session_state.cash = st.number_input(
+        "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
+    )
+
+# ===================================================
+# ================= REQUIRED ACTIONS ================
+# ===================================================
 
 with st.expander("⚠️ Required Actions"):
 
@@ -146,13 +165,20 @@ with st.expander("⚠️ Required Actions"):
         if price and price > 0:
             shares = int(st.session_state.cash // price)
             if shares > 0:
-                st.success(f"Best use of cash → Buy {shares} shares of {best['Ticker']}")
+                st.success(
+                    f"Best use of cash → Buy **{shares} shares of {best['Ticker']}** "
+                    f"(${shares * price:.2f})"
+                )
             else:
                 st.warning("Not enough cash to buy 1 full share.")
         else:
             st.warning("Price unavailable.")
     else:
         st.info("Add cash to get buy recommendations.")
+
+# ===================================================
+# ================= WARNINGS ========================
+# ===================================================
 
 with st.expander("🚨 Warnings & Risk"):
 
@@ -169,16 +195,46 @@ with st.expander("🚨 Warnings & Risk"):
     if not warnings_found:
         st.success("✅ No immediate risks detected in your ETFs.")
 
+# ===================================================
+# ================= NEWS ============================
+# ===================================================
+
 with st.expander("📰 News & Events"):
+
+    UNDERLYING_MAP = {
+        "CHPY": ["SOXX"],
+        "QDTE": ["QQQ", "NDX"],
+        "XDTE": ["SPY", "SPX"],
+    }
 
     for t in ETF_LIST:
         st.markdown(f"### {t}")
-        news = get_news(t)
-        if news:
-            for title, link in news:
+
+        # ETF NEWS
+        etf_news = get_news(t)
+        if etf_news:
+            st.markdown("**ETF News:**")
+            for title, link in etf_news:
                 st.markdown(f"- [{title}]({link})")
         else:
-            st.caption("No recent news found.")
+            st.caption("No recent ETF news.")
+
+        # UNDERLYING NEWS
+        if t in UNDERLYING_MAP:
+            for u in UNDERLYING_MAP[t]:
+                st.markdown(f"**Underlying: {u}**")
+                u_news = get_news(u)
+                if u_news:
+                    for title, link in u_news:
+                        st.markdown(f"- [{title}]({link})")
+                else:
+                    st.caption("No recent underlying news.")
+
+        st.divider()
+
+# ===================================================
+# ================= EXPORT ==========================
+# ===================================================
 
 with st.expander("📤 Export & History"):
 
@@ -200,4 +256,8 @@ with st.expander("📤 Export & History"):
         merged["Income Change"] = merged["Annual Income_Now"] - merged["Annual Income_Old"]
         st.dataframe(merged)
 
-st.caption("Baseline locked • Monthly income added • warnings always visible")
+# ===================================================
+# ================= FOOTER ==========================
+# ===================================================
+
+st.caption("v10.6 • Monthly income + ETF & underlying news • strategy logic untouched")
