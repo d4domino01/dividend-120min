@@ -77,14 +77,6 @@ def get_trend(ticker):
     except:
         return "Unknown"
 
-@st.cache_data(ttl=1800)
-def get_news(ticker):
-    try:
-        news = yf.Ticker(ticker).news[:5]
-        return [(n["title"], n["link"]) for n in news]
-    except:
-        return []
-
 # ================= BUILD CURRENT DATA =================
 rows = []
 
@@ -237,12 +229,11 @@ with st.expander("🚨 Warnings & Risk"):
         st.success("✅ No immediate risks detected in your ETFs.")
 
 # ===================================================
-# ================= NEWS ============================
+# ========== MARKET STRESS — PHASE 1 =================
 # ===================================================
 
 with st.expander("📉 Market Stress & Early Warnings"):
 
-    # Proxies that actually move your ETFs
     STRESS_MAP = {
         "QDTE": ["QQQ", "AAPL", "MSFT"],
         "CHPY": ["SOXX", "NVDA", "AMD"],
@@ -250,14 +241,28 @@ with st.expander("📉 Market Stress & Early Warnings"):
     }
 
     @st.cache_data(ttl=600)
-    def get_daily_change(ticker):
+    def get_stress_metrics(ticker):
         try:
-            df = yf.Ticker(ticker).history(period="5d")
-            if len(df) < 2:
+            df = yf.Ticker(ticker).history(period="15d")
+            if len(df) < 10:
                 return None
+
             prev = df["Close"].iloc[-2]
             last = df["Close"].iloc[-1]
-            return round((last - prev) / prev * 100, 2)
+            daily_pct = (last - prev) / prev * 100
+
+            returns = df["Close"].pct_change().dropna()
+            vol = returns[-10:].std() * 100
+
+            if "Volume" in df:
+                avg_vol = df["Volume"][-11:-1].mean()
+                today_vol = df["Volume"].iloc[-1]
+                vol_spike = today_vol / avg_vol if avg_vol > 0 else 1
+            else:
+                vol_spike = 1
+
+            return round(daily_pct,2), round(vol,2), round(vol_spike,2)
+
         except:
             return None
 
@@ -265,43 +270,46 @@ with st.expander("📉 Market Stress & Early Warnings"):
         st.markdown(f"### {etf}")
 
         proxies = STRESS_MAP.get(etf, [])
-
-        stress_count = 0
+        stress_score = 0
 
         for p in proxies:
-            chg = get_daily_change(p)
+            data = get_stress_metrics(p)
 
-            if chg is None:
+            if data is None:
                 st.caption(f"{p}: data unavailable")
                 continue
 
-            if chg <= -2:
-                st.error(f"{p}: {chg}% today — strong downside pressure")
-                stress_count += 2
-            elif chg <= -1:
-                st.warning(f"{p}: {chg}% today — moderate weakness")
-                stress_count += 1
-            elif chg >= 2:
-                st.success(f"{p}: +{chg}% — strong upside momentum")
-            else:
-                st.caption(f"{p}: {chg}%")
+            daily, vol, vol_spike = data
+            msg = f"{p}: {daily}% | vol {vol}% | vol x{vol_spike}"
 
-        # ---- ETF LEVEL ASSESSMENT ----
-        if stress_count >= 3:
-            st.error("🚨 High stress environment for this ETF.")
-        elif stress_count >= 1:
-            st.warning("⚠️ Some market weakness detected.")
+            if daily <= -2 and vol_spike >= 1.5:
+                st.error("🚨 " + msg)
+                stress_score += 35
+            elif daily <= -1:
+                st.warning("⚠️ " + msg)
+                stress_score += 20
+            elif daily >= 2:
+                st.success("📈 " + msg)
+            else:
+                st.caption(msg)
+
+        st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
+
+        if stress_score >= 60:
+            st.error("🔴 High risk environment — protect capital")
+        elif stress_score >= 30:
+            st.warning("🟡 Elevated risk — be cautious adding")
         else:
-            st.success("✅ No major stress signals detected.")
+            st.success("🟢 Market behavior stable")
 
         st.divider()
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
 # ===================================================
+
 with st.expander("📤 Export & History"):
 
-    # ---- RESET HISTORY ----
     if st.button("🗑️ Reset Snapshot History"):
         files = glob.glob(os.path.join(SNAP_DIR, "*.csv"))
         for f in files:
@@ -310,14 +318,12 @@ with st.expander("📤 Export & History"):
 
     st.divider()
 
-    # ---- SAVE SNAPSHOT ----
     if st.button("💾 Save Snapshot"):
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
         path = os.path.join(SNAP_DIR, f"{ts}.csv")
         df.to_csv(path, index=False)
         st.success("Snapshot saved.")
 
-        # keep only last N snapshots
         files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
         if len(files) > MAX_SNAPSHOTS:
             for f in files[:-MAX_SNAPSHOTS]:
@@ -325,7 +331,6 @@ with st.expander("📤 Export & History"):
 
     st.divider()
 
-    # ---- LOAD HISTORY ----
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
 
     if snap_files:
@@ -347,7 +352,6 @@ with st.expander("📤 Export & History"):
 
     st.divider()
 
-    # ---- DOWNLOAD CURRENT CSV ----
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
         "⬇️ Download Current Portfolio CSV",
@@ -356,4 +360,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v11.2 • inputs saved on your phone • snapshots for monitoring • automatic warnings")
+st.caption("v12.0 • Phase-1 market stress detection • price + volatility + volume scoring")
