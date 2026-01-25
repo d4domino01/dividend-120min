@@ -6,10 +6,10 @@ from datetime import datetime
 # ================= PAGE =================
 st.set_page_config(page_title="Income Engine", layout="centered")
 
-st.markdown("## 📈 Income Strategy Engine")
-st.markdown("Dividend Income Monitor")
+st.markdown("### 📈 Income Strategy Engine")
+st.markdown("**Dividend Run-Up Monitor**")
 
-# ================= ETFS =================
+# ================= DEFAULT ETFS =================
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
 if "holdings" not in st.session_state:
@@ -29,6 +29,16 @@ def get_price(ticker):
         return None
 
 @st.cache_data(ttl=900)
+def get_auto_div(ticker):
+    try:
+        divs = yf.Ticker(ticker).dividends
+        if len(divs) == 0:
+            return 0.0
+        return round(divs[-1], 4)
+    except:
+        return 0.0
+
+@st.cache_data(ttl=900)
 def get_trend(ticker):
     try:
         df = yf.Ticker(ticker).history(period="1mo")
@@ -44,11 +54,12 @@ def get_news(ticker):
     except:
         return []
 
-# ================= BUILD PORTFOLIO =================
+# ================= BUILD DATA =================
 rows = []
 
 for t in ETF_LIST:
     price = get_price(t)
+    auto_div = get_auto_div(t)
     trend = get_trend(t)
 
     shares = st.session_state.holdings[t]["shares"]
@@ -62,6 +73,7 @@ for t in ETF_LIST:
         "Shares": shares,
         "Price": price,
         "Weekly Div": weekly_div,
+        "Auto Div": auto_div,
         "Annual Income": round(annual_income, 2),
         "Value": round(value, 2),
         "Trend": trend
@@ -82,7 +94,7 @@ elif down == 1:
 else:
     market = "🟢 BUY / ACCUMULATE"
 
-st.markdown(f"### 🌍 Market Condition: {market}")
+st.markdown(f"**🌍 Market:** {market}")
 
 # ===================================================
 # =================== PORTFOLIO =====================
@@ -92,7 +104,6 @@ with st.expander("📁 Portfolio", expanded=True):
 
     for t in ETF_LIST:
         st.markdown(f"**{t}**")
-
         c1, c2 = st.columns(2)
 
         with c1:
@@ -108,8 +119,13 @@ with st.expander("📁 Portfolio", expanded=True):
                 value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
             )
 
-        r = df[df.Ticker == t].iloc[0]
-        st.caption(f"Price: ${r.Price} | Value: ${r.Value:.2f} | Annual Income: ${r['Annual Income']:.2f}")
+        auto = df[df.Ticker == t]["Auto Div"].iloc[0]
+        price = df[df.Ticker == t]["Price"].iloc[0]
+        value = df[df.Ticker == t]["Value"].iloc[0]
+        income = df[df.Ticker == t]["Annual Income"].iloc[0]
+
+        st.caption(f"Price: ${price} | Auto div: {auto}")
+        st.caption(f"Value: ${value:.2f} | Annual income: ${income:.2f}")
         st.divider()
 
     st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
@@ -127,7 +143,7 @@ with st.expander("⚠️ Required Actions"):
 
     for _, r in df.iterrows():
         if r["Trend"] == "Down":
-            st.error(f"{r['Ticker']}: Downtrend — avoid adding / consider trimming.")
+            st.error(f"{r['Ticker']}: Weak trend — avoid adding or consider trimming.")
         else:
             st.success(f"{r['Ticker']}: Trend OK for buying.")
 
@@ -146,7 +162,7 @@ with st.expander("⚠️ Required Actions"):
         else:
             st.warning("Price unavailable.")
     else:
-        st.info("Add cash to get buy suggestions.")
+        st.info("Add cash to get buy recommendations.")
 
 # ===================================================
 # ================= WARNINGS ========================
@@ -158,7 +174,7 @@ with st.expander("🚨 Warnings & Risk"):
         if r["Weekly Div"] == 0:
             st.error(f"{r['Ticker']}: Weekly distribution is 0.")
         if r["Trend"] == "Down":
-            st.warning(f"{r['Ticker']}: Price trend is down.")
+            st.warning(f"{r['Ticker']}: Downtrend detected.")
 
 # ===================================================
 # ================= NEWS ============================
@@ -173,7 +189,7 @@ with st.expander("📰 News & Events"):
             for title, link in news:
                 st.markdown(f"- [{title}]({link})")
         else:
-            st.caption("No recent news.")
+            st.caption("No recent news found.")
 
 # ===================================================
 # ================= EXPORT ==========================
@@ -203,4 +219,4 @@ with st.expander("📤 Export & History"):
 # ================= FOOTER ==========================
 # ===================================================
 
-st.caption("Stable baseline • full inputs • no hidden logic • mobile friendly")
+st.caption("vA-mobile-fixed • inputs restored • populated sections • no removed logic")
