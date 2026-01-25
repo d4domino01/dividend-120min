@@ -242,11 +242,11 @@ with st.expander("🚨 Warnings & Risk"):
 
 with st.expander("📰 News & Events"):
 
-    UNDERLYING_MAP = {
-        "CHPY": ["SOXX"],
-        "QDTE": ["QQQ", "NDX"],
-        "XDTE": ["SPY", "SPX"],
-    }
+UNDERLYING_MAP = {
+    "QDTE": ["QQQ", "MSFT", "AAPL"],   # Nasdaq drivers
+    "CHPY": ["SOXX", "NVDA", "AMD"],   # Semiconductor stress
+    "XDTE": ["SPY", "VIX"],            # Market + volatility
+}
 
     for t in ETF_LIST:
         st.markdown(f"### {t}")
