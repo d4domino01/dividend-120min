@@ -2,23 +2,29 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+import os
+import glob
 
+# ================= PAGE =================
 st.set_page_config(page_title="Income Engine", layout="centered")
 
 st.markdown("## 📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
+SNAP_DIR = "snapshots"
+MAX_SNAPSHOTS = 14
 
+os.makedirs(SNAP_DIR, exist_ok=True)
+
+# ================= SESSION =================
 if "holdings" not in st.session_state:
     st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
 
 if "cash" not in st.session_state:
     st.session_state.cash = 0.0
 
-if "last_snapshot" not in st.session_state:
-    st.session_state.last_snapshot = None
-
+# ================= DATA =================
 @st.cache_data(ttl=900)
 def get_price(ticker):
     try:
@@ -52,6 +58,7 @@ def get_news(ticker):
     except:
         return []
 
+# ================= BUILD CURRENT DATA =================
 rows = []
 
 for t in ETF_LIST:
@@ -84,6 +91,7 @@ total_value = df["Value"].sum() + st.session_state.cash
 total_annual_income = df["Annual Income"].sum()
 total_monthly_income = total_annual_income / 12
 
+# ================= MARKET CONDITION =================
 down = (df["Trend"] == "Down").sum()
 
 if down >= 2:
@@ -97,6 +105,10 @@ st.markdown(
     f"<div style='padding:10px;border-radius:8px;background:#111'><b>🌍 Market Condition:</b> {market}</div>",
     unsafe_allow_html=True,
 )
+
+# ===================================================
+# =================== PORTFOLIO =====================
+# ===================================================
 
 with st.expander("📁 Portfolio", expanded=True):
 
@@ -132,6 +144,10 @@ with st.expander("📁 Portfolio", expanded=True):
 
     st.session_state.cash = st.number_input("💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash)
 
+# ===================================================
+# ================= REQUIRED ACTIONS ================
+# ===================================================
+
 with st.expander("⚠️ Required Actions"):
 
     for _, r in df.iterrows():
@@ -140,10 +156,25 @@ with st.expander("⚠️ Required Actions"):
         else:
             st.success(f"{r['Ticker']}: Trend OK for buying.")
 
+    if st.session_state.cash > 0:
+        best = df.sort_values("Annual Income", ascending=False).iloc[0]
+        price = best["Price"]
+        if price and price > 0:
+            shares = int(st.session_state.cash // price)
+            if shares > 0:
+                st.success(f"Best use of cash → Buy {shares} shares of {best['Ticker']}")
+            else:
+                st.warning("Not enough cash to buy 1 full share.")
+
+# ===================================================
+# ================= WARNINGS & RISK =================
+# ===================================================
+
 with st.expander("🚨 Warnings & Risk"):
 
     warnings_found = False
 
+    # ---- basic checks ----
     for _, r in df.iterrows():
         if r["Weekly Div"] == 0:
             st.error(f"{r['Ticker']}: Weekly distribution is 0.")
@@ -152,8 +183,31 @@ with st.expander("🚨 Warnings & Risk"):
             st.warning(f"{r['Ticker']}: Downtrend detected.")
             warnings_found = True
 
+    # ---- history based checks ----
+    snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
+    if snap_files:
+        old = pd.read_csv(snap_files[0])  # oldest in window
+        merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
+
+        merged["Income Drop %"] = (
+            (merged["Annual Income_Old"] - merged["Annual Income_Now"])
+            / merged["Annual Income_Old"].replace(0, 1)
+        ) * 100
+
+        for _, r in merged.iterrows():
+            if r["Income Drop %"] > 5:
+                st.error(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% vs history.")
+                warnings_found = True
+            if r["Weekly Div_Now"] < r["Weekly Div_Old"]:
+                st.error(f"{r['Ticker']}: Weekly distribution cut detected.")
+                warnings_found = True
+
     if not warnings_found:
         st.success("✅ No immediate risks detected in your ETFs.")
+
+# ===================================================
+# ================= NEWS ============================
+# ===================================================
 
 with st.expander("📰 News & Events"):
 
@@ -186,25 +240,55 @@ with st.expander("📰 News & Events"):
 
         st.divider()
 
+# ===================================================
+# ================= EXPORT & HISTORY =================
+# ===================================================
+
 with st.expander("📤 Export & History"):
 
     if st.button("💾 Save Snapshot"):
-        st.session_state.last_snapshot = df.copy()
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        path = os.path.join(SNAP_DIR, f"{ts}.csv")
+        df.to_csv(path, index=False)
         st.success("Snapshot saved.")
 
-    if st.session_state.last_snapshot is not None:
-        old = st.session_state.last_snapshot
-        merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
-        merged["Value Change"] = merged["Value_Now"] - merged["Value_Old"]
-        merged["Income Change"] = merged["Annual Income_Now"] - merged["Annual Income_Old"]
-        st.dataframe(merged)
+        # cleanup old
+        files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
+        if len(files) > MAX_SNAPSHOTS:
+            for f in files[:-MAX_SNAPSHOTS]:
+                os.remove(f)
+
+    snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
+
+    if snap_files:
+        hist = []
+        for f in snap_files:
+            d = pd.read_csv(f)
+            d["Date"] = os.path.basename(f).replace(".csv", "")
+            hist.append(d)
+
+        hist_df = pd.concat(hist)
+
+        st.subheader("📈 Monthly Income Trend")
+        income_trend = hist_df.groupby("Date")["Monthly Income"].sum()
+        st.line_chart(income_trend)
+
+        st.subheader("📈 Portfolio Value Trend")
+        value_trend = hist_df.groupby("Date")["Value"].sum()
+        st.line_chart(value_trend)
+    else:
+        st.info("No history yet. Save snapshots over days to see trends.")
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "⬇️ Download Portfolio CSV",
+        "⬇️ Download Current Portfolio CSV",
         data=csv,
         file_name=f"portfolio_snapshot_{datetime.now().date()}.csv",
         mime="text/csv"
     )
 
-st.caption("v10.7 • Mobile-safe history • no file upload needed")
+# ===================================================
+# ================= FOOTER ==========================
+# ===================================================
+
+st.caption("v11.0 • multi-snapshot monitoring • income & value trends • automatic warnings")
