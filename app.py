@@ -3,9 +3,10 @@ import pandas as pd
 from datetime import datetime
 import feedparser
 import yfinance as yf
+import numpy as np
 
 # -------------------- CONFIG --------------------
-st.set_page_config(page_title="Income Strategy Engine", layout="wide")
+st.set_page_config(page_title="Dividend Strategy", layout="wide")
 
 # -------------------- DEFAULT DATA --------------------
 DEFAULT_ETFS = {
@@ -19,6 +20,8 @@ UNDERLYING_MAP = {
     "XDTE": "SPY",
     "CHPY": "SOXX",
 }
+
+ALL_TICKERS = list(UNDERLYING_MAP.keys()) + list(set(UNDERLYING_MAP.values()))
 
 # -------------------- SESSION STATE --------------------
 if "etfs" not in st.session_state:
@@ -115,6 +118,7 @@ def income_risk_signal(ticker):
     return "OK"
 
 
+# -------------------- MARKET REGIME FILTER --------------------
 def market_regime_signal():
     try:
         df = yf.download("SPY", period="1y", interval="1d", progress=False)
@@ -131,36 +135,68 @@ def market_regime_signal():
     return "UNKNOWN"
 
 
+# -------------------- CORRELATION SPIKE ALERT --------------------
+def portfolio_correlation_risk(tickers):
+    try:
+        prices = {}
+        for t in tickers:
+            df = yf.download(t, period="1mo", interval="1d", progress=False)
+            if not df.empty:
+                prices[t] = df["Close"]
+
+        dfp = pd.DataFrame(prices).dropna()
+        if len(dfp) < 10:
+            return "UNKNOWN", None
+
+        corr = dfp.pct_change().corr().values
+        upper = corr[np.triu_indices_from(corr, k=1)]
+        avg_corr = upper.mean()
+
+        if avg_corr > 0.8:
+            return "HIGH", avg_corr
+        elif avg_corr > 0.6:
+            return "ELEVATED", avg_corr
+        else:
+            return "LOW", avg_corr
+
+    except:
+        pass
+
+    return "UNKNOWN", None
+
+
 market_regime = market_regime_signal()
+corr_level, corr_value = portfolio_correlation_risk(ALL_TICKERS)
 
 
 def final_signal(ticker, price_sig, pay_sig, income_risk, underlying_trend):
     last_sig = st.session_state.last_price_signal.get(ticker)
 
-    base_signal = "⚪ UNKNOWN"
-
     if income_risk == "COLLAPSING":
-        base_signal = "🔴 REDUCE 33% (Income Risk)"
+        base = "🔴 REDUCE 33% (Income Risk)"
     elif underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
-        base_signal = "🔴 REDUCE 33%"
+        base = "🔴 REDUCE 33%"
     elif underlying_trend == "WEAK":
-        base_signal = "🟠 PAUSE (Strategy Weak)"
+        base = "🟠 PAUSE (Strategy Weak)"
     elif price_sig == "STRONG":
-        base_signal = "🟢 BUY"
+        base = "🟢 BUY"
     elif price_sig == "NEUTRAL" and pay_sig == "RISING":
-        base_signal = "🟢 ADD"
+        base = "🟢 ADD"
     elif price_sig == "NEUTRAL":
-        base_signal = "🟡 HOLD"
+        base = "🟡 HOLD"
     elif price_sig == "WEAK":
-        base_signal = "🟠 PAUSE"
+        base = "🟠 PAUSE"
+    else:
+        base = "⚪ UNKNOWN"
 
     if market_regime == "BEAR":
-        if "BUY" in base_signal or "ADD" in base_signal:
+        if "BUY" in base or "ADD" in base:
             return "🟡 HOLD (Market Bear)"
-        if "PAUSE" in base_signal:
+        if "PAUSE" in base:
             return "🔴 REDUCE 33% (Market Bear)"
 
-    return base_signal
+    return base
+
 
 # -------------------- UNDERLYING ANALYSIS --------------------
 underlying_trends = {}
@@ -221,60 +257,51 @@ if st.session_state.last_income_snapshot:
         * 100
     )
 
-# =========================================================
-# 🧠 PORTFOLIO RISK SCORING (NEW)
-# =========================================================
-risk_score = 0
-
-for v in signals.values():
-    if "REDUCE" in v:
-        risk_score += 25
-    elif "PAUSE" in v:
-        risk_score += 15
-
-for r in income_risks.values():
-    if r == "COLLAPSING":
-        risk_score += 30
-
-if market_regime == "BEAR":
-    risk_score += 20
-
-if drawdown_pct <= -15:
-    risk_score += 25
-elif drawdown_pct <= -8:
-    risk_score += 15
-
-for v in underlying_vol.values():
-    if v == "HIGH":
-        risk_score += 10
-
-risk_score = min(100, risk_score)
-
-if risk_score >= 76:
-    portfolio_risk = "🔴 CRITICAL"
-elif risk_score >= 51:
-    portfolio_risk = "🟠 HIGH"
-elif risk_score >= 26:
-    portfolio_risk = "🟡 MEDIUM"
-else:
-    portfolio_risk = "🟢 LOW"
-
 # -------------------- HEADER --------------------
-st.markdown("## 🔥 Dividend Strategy")
+st.markdown("## 💰 Dividend Strategy — v9.1")
 
 # -------------------- KPI CARDS --------------------
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4 = st.columns(4)
 
 c1.metric("💼 Portfolio Value", f"${total_value:,.0f}")
 c2.metric("💸 Monthly Income", f"${monthly_income:,.2f}")
 
 if income_change_pct is not None:
-    c3.metric("📉 Income Change", f"{income_change_pct:.1f}%", delta=f"{income_change_pct:.1f}%")
+    c3.metric("📉 Income Change", f"{income_change_pct:.1f}%")
 else:
     c3.metric("📉 Income Change", "—")
 
-c4.metric("🛡 Strategy Status", portfolio_risk)
-c5.metric("🧠 Risk Score", f"{risk_score} / 100")
+status = "HEALTHY"
+if corr_level == "HIGH":
+    status = "SYSTEMIC RISK"
+elif market_regime == "BEAR":
+    status = "DEFENSIVE (Market)"
+elif any(v == "COLLAPSING" for v in income_risks.values()):
+    status = "INCOME RISK"
+elif drawdown_pct <= -15:
+    status = "DEFENSIVE"
+elif drawdown_pct <= -8:
+    status = "CAUTION"
+elif any("🔴" in v for v in signals.values()):
+    status = "RISK"
+elif any("🟠" in v for v in signals.values()):
+    status = "CAUTION"
+
+c4.metric("🛡 Strategy Status", status)
+
+# =========================================================
+# 🧠 PORTFOLIO CORRELATION RISK
+# =========================================================
+st.subheader("🧠 Systemic Correlation Risk")
+
+if corr_level == "HIGH":
+    st.error(f"🔴 HIGH correlation detected ({corr_value:.2f}) — crash risk elevated")
+elif corr_level == "ELEVATED":
+    st.warning(f"🟠 Elevated correlation ({corr_value:.2f}) — markets moving together")
+elif corr_level == "LOW":
+    st.success(f"🟢 Correlation normal ({corr_value:.2f})")
+else:
+    st.info("Correlation unavailable")
 
 # =========================================================
 # 📊 STRATEGY & ETF MONITOR
@@ -408,7 +435,7 @@ with st.expander("⚙️ Portfolio Actions"):
 
         st.success(f"Recommended: **{best}**")
 
-        if shares > 0 and st.button("✅ Execute Buy"):
+        if shares > 0 and st.button("✅️ Execute Buy"):
             st.session_state.etfs[best]["shares"] += shares
             st.session_state.cash_wallet -= cost
             st.rerun()
@@ -481,4 +508,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v9.0 — portfolio-level risk scoring added for faster defensive response.")
+st.caption("v9.1 — systemic correlation risk added for early crash detection.")
