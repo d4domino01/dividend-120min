@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-import os
-import glob
-import json
+import os, glob, json
+import streamlit.components.v1 as components
 
 # ================= PAGE =================
 st.set_page_config(page_title="Income Engine", layout="centered")
@@ -15,43 +14,41 @@ st.caption("Dividend Run-Up Monitor")
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
 SNAP_DIR = "snapshots"
-STATE_FILE = "portfolio_state.json"
 MAX_SNAPSHOTS = 14
-
 os.makedirs(SNAP_DIR, exist_ok=True)
 
-# ================= LOAD SAVED STATE =================
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return None
-    return None
+# =========================================================
+# ============== CLIENT-SIDE STORAGE (PHONE) ==============
+# =========================================================
 
-def save_state():
-    state = {
-        "holdings": st.session_state.holdings,
-        "cash": st.session_state.cash
+def load_from_browser():
+    components.html("""
+    <script>
+    const data = localStorage.getItem("portfolio_state");
+    if (data) {
+        const obj = JSON.parse(data);
+        for (const k in obj) {
+            window.parent.postMessage({type:"LOAD", key:k, value:obj[k]}, "*");
+        }
     }
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+    </script>
+    """, height=0)
 
-saved = load_state()
+def save_to_browser(state):
+    components.html(f"""
+    <script>
+    localStorage.setItem("portfolio_state", JSON.stringify({json.dumps(state)}));
+    </script>
+    """, height=0)
+
+load_from_browser()
 
 # ================= SESSION =================
 if "holdings" not in st.session_state:
-    if saved and "holdings" in saved:
-        st.session_state.holdings = saved["holdings"]
-    else:
-        st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
+    st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
 
 if "cash" not in st.session_state:
-    if saved and "cash" in saved:
-        st.session_state.cash = saved["cash"]
-    else:
-        st.session_state.cash = 0.0
+    st.session_state.cash = 0.0
 
 # ================= DATA =================
 @st.cache_data(ttl=900)
@@ -148,16 +145,14 @@ with st.expander("📁 Portfolio", expanded=True):
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
                 "Shares", min_value=0, step=1,
-                value=st.session_state.holdings[t]["shares"], key=f"s_{t}",
-                on_change=save_state
+                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
             )
 
         with c2:
             st.session_state.holdings[t]["weekly_div"] = st.number_input(
                 "Weekly Distribution ($)",
                 min_value=0.0, step=0.01,
-                value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}",
-                on_change=save_state
+                value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
             )
 
         r = df[df.Ticker == t].iloc[0]
@@ -174,9 +169,14 @@ with st.expander("📁 Portfolio", expanded=True):
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
     st.session_state.cash = st.number_input(
-        "💰 Cash Wallet ($)", min_value=0.0, step=50.0,
-        value=st.session_state.cash, on_change=save_state
+        "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
     )
+
+# ---- SAVE TO PHONE ----
+save_to_browser({
+    "holdings": st.session_state.holdings,
+    "cash": st.session_state.cash
+})
 
 # ===================================================
 # ================= REQUIRED ACTIONS ================
@@ -314,4 +314,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v11.1 • persistent inputs + multi-snapshot monitoring + automatic warnings")
+st.caption("v11.2 • inputs saved on your phone • snapshots for monitoring • automatic warnings")
