@@ -274,27 +274,33 @@ with st.expander("📰 News & Events"):
 # ===================================================
 # ================= EXPORT & HISTORY =================
 # ===================================================
-
 with st.expander("📤 Export & History"):
 
-if st.button("🗑️ Reset Snapshot History"):
-
+    # ---- RESET HISTORY ----
+    if st.button("🗑️ Reset Snapshot History"):
         files = glob.glob(os.path.join(SNAP_DIR, "*.csv"))
         for f in files:
             os.remove(f)
         st.success("Snapshot history cleared. Start fresh from now.")
 
+    st.divider()
+
+    # ---- SAVE SNAPSHOT ----
     if st.button("💾 Save Snapshot"):
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
         path = os.path.join(SNAP_DIR, f"{ts}.csv")
         df.to_csv(path, index=False)
         st.success("Snapshot saved.")
 
+        # keep only last N snapshots
         files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
         if len(files) > MAX_SNAPSHOTS:
             for f in files[:-MAX_SNAPSHOTS]:
                 os.remove(f)
 
+    st.divider()
+
+    # ---- LOAD HISTORY ----
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
 
     if snap_files:
@@ -312,8 +318,11 @@ if st.button("🗑️ Reset Snapshot History"):
         st.subheader("📈 Portfolio Value Trend")
         st.line_chart(hist_df.groupby("Date")["Value"].sum())
     else:
-        st.info("No history yet. Save snapshots over days to see trends.")
+        st.info("No history yet. Save snapshots to start tracking trends.")
 
+    st.divider()
+
+    # ---- DOWNLOAD CURRENT CSV ----
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
         "⬇️ Download Current Portfolio CSV",
