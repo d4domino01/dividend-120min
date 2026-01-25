@@ -165,31 +165,27 @@ with st.expander("📁 Portfolio", expanded=True):
         "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
     )
 
-# ---- SAVE TO PHONE ----
 save_to_browser({
     "holdings": st.session_state.holdings,
     "cash": st.session_state.cash
 })
 
 # ===================================================
-# ================= REQUIRED ACTIONS ================
+# ================= REQUIRED ACTIONS =================
 # ===================================================
 
 with st.expander("⚠️ Required Actions"):
 
-    for _, r in df.iterrows():
-        if r["Trend"] == "Down":
-            st.error(f"{r['Ticker']}: Weak trend — avoid adding or consider trimming.")
-        else:
-            st.success(f"{r['Ticker']}: Trend OK for buying.")
+    # Phase-3 Action Logic
+    action_map = {}
 
-    if st.session_state.cash > 0:
-        best = df.sort_values("Annual Income", ascending=False).iloc[0]
-        price = best["Price"]
-        if price and price > 0:
-            shares = int(st.session_state.cash // price)
-            if shares > 0:
-                st.success(f"Best use of cash → Buy {shares} shares of {best['Ticker']}")
+    for _, r in df.iterrows():
+        action = "ACCUMULATE"
+
+        if r["Trend"] == "Down":
+            action = "HOLD"
+
+        action_map[r["Ticker"]] = action
 
 # ===================================================
 # ================= WARNINGS & RISK =================
@@ -208,6 +204,8 @@ with st.expander("🚨 Warnings & Risk"):
             warnings_found = True
 
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
+    income_drop_map = {}
+
     if snap_files:
         old = pd.read_csv(snap_files[0])
         merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
@@ -218,6 +216,7 @@ with st.expander("🚨 Warnings & Risk"):
         ) * 100
 
         for _, r in merged.iterrows():
+            income_drop_map[r["Ticker"]] = r["Income Drop %"]
             if r["Income Drop %"] > 5:
                 st.error(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% vs history.")
                 warnings_found = True
@@ -266,6 +265,8 @@ with st.expander("📉 Market Stress & Early Warnings"):
         except:
             return None
 
+    stress_scores = {}
+
     for etf in ETF_LIST:
         st.markdown(f"### {etf}")
 
@@ -293,6 +294,8 @@ with st.expander("📉 Market Stress & Early Warnings"):
             else:
                 st.caption(msg)
 
+        stress_scores[etf] = stress_score
+
         st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
 
         if stress_score >= 60:
@@ -303,6 +306,24 @@ with st.expander("📉 Market Stress & Early Warnings"):
             st.success("🟢 Market behavior stable")
 
         st.divider()
+
+# ===================================================
+# ========== PHASE 3 — ACTION ENGINE =================
+# ===================================================
+
+with st.expander("🧠 Strategy Signals (Phase 3)"):
+
+    for etf in ETF_LIST:
+        trend = df[df.Ticker == etf]["Trend"].iloc[0]
+        stress = stress_scores.get(etf, 0)
+        income_drop = income_drop_map.get(etf, 0)
+
+        if stress >= 60 or income_drop > 8:
+            st.error(f"{etf}: 🔴 SELL / REDUCE — high risk & income instability")
+        elif stress >= 30 or trend == "Down":
+            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — wait for stability")
+        else:
+            st.success(f"{etf}: 🟢 ACCUMULATE — conditions acceptable")
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -360,4 +381,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v12.0 • Phase-1 market stress detection • price + volatility + volume scoring")
+st.caption("v13.0 • Phase-1 stress detection + Phase-3 strategy signals • auto SELL / HOLD / BUY guidance")
