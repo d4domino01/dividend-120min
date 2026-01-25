@@ -7,11 +7,6 @@ import yfinance as yf
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# -------------------- CACHED DATA LOADER --------------------
-@st.cache_data(ttl=900)
-def load_prices(ticker, period="2mo"):
-    return yf.download(ticker, period=period, interval="1d", progress=False)
-
 # -------------------- DEFAULT DATA --------------------
 DEFAULT_ETFS = {
     "QDTE": {"shares": 125, "price": 30.82, "yield": 0.30, "type": "Income"},
@@ -47,6 +42,7 @@ if "last_price_signal" not in st.session_state:
 if "last_income_snapshot" not in st.session_state:
     st.session_state.last_income_snapshot = None
 
+# drawdown tracking
 if "peak_portfolio_value" not in st.session_state:
     st.session_state.peak_portfolio_value = None
 
@@ -60,7 +56,7 @@ if "payouts" not in st.session_state:
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
     try:
-        df = load_prices(ticker, "1mo")
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if len(df) >= 10:
             recent = df.tail(15)
             low = recent["Close"].min()
@@ -78,7 +74,7 @@ def price_trend_signal(ticker):
 
 def volatility_regime(ticker):
     try:
-        df = load_prices(ticker, "1mo")
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if len(df) >= 10:
             df["range"] = (df["High"] - df["Low"]) / df["Close"]
             recent = df["range"].tail(10).mean()
@@ -97,7 +93,7 @@ def volatility_regime(ticker):
 def payout_signal(ticker):
     pays = st.session_state.payouts.get(ticker, [])
     if len(pays) < 4:
-        return "STABLE"
+        return "UNKNOWN"
     recent_avg = sum(pays[-2:]) / 2
     older_avg = sum(pays[:2]) / 2
     if recent_avg > older_avg * 1.05:
@@ -108,50 +104,20 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-# -------------------- FIXED MOMENTUM SIGNAL --------------------
-def momentum_signal(ticker):
-    try:
-        df = load_prices(ticker, "2mo")
-        if len(df) >= 25:
-            df["MA5"] = df["Close"].rolling(5).mean()
-            df["MA20"] = df["Close"].rolling(20).mean()
-            last = df.iloc[-1]
-            if last["MA5"] < last["MA20"]:
-                return "WEAK"
-            else:
-                return "STRONG"
-        elif len(df) >= 10:
-            slope = df["Close"].iloc[-1] - df["Close"].iloc[-10]
-            if slope < 0:
-                return "WEAK"
-            else:
-                return "NEUTRAL"
-    except:
-        pass
-    return "NEUTRAL"
+def income_risk_signal(ticker):
+    pays = st.session_state.payouts.get(ticker, [])
+    if len(pays) < 4:
+        return "UNKNOWN"
+    recent_avg = sum(pays[-4:]) / 4
+    older_est = sum(pays[:2]) / 2
+    if older_est > 0 and recent_avg < older_est * 0.75:
+        return "COLLAPSING"
+    return "OK"
 
 
-# -------------------- VIX ALERT --------------------
-def vix_alert():
-    try:
-        df = load_prices("^VIX", "5d")
-        if len(df) > 0:
-            vix = df["Close"].iloc[-1]
-            if vix > 30:
-                return "PANIC", vix
-            elif vix > 25:
-                return "HIGH", vix
-            else:
-                return "NORMAL", vix
-    except:
-        pass
-    return "UNKNOWN", None
-
-
-# -------------------- MARKET REGIME --------------------
 def market_regime_signal():
     try:
-        df = load_prices("SPY", "1y")
+        df = yf.download("SPY", period="1y", interval="1d", progress=False)
         if len(df) >= 200:
             df["MA50"] = df["Close"].rolling(50).mean()
             df["MA200"] = df["Close"].rolling(200).mean()
@@ -166,65 +132,59 @@ def market_regime_signal():
 
 
 market_regime = market_regime_signal()
-vix_state, vix_value = vix_alert()
+
+
+def final_signal(ticker, price_sig, pay_sig, income_risk, underlying_trend):
+    last_sig = st.session_state.last_price_signal.get(ticker)
+
+    base_signal = "⚪ UNKNOWN"
+
+    if income_risk == "COLLAPSING":
+        base_signal = "🔴 REDUCE 33% (Income Risk)"
+    elif underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
+        base_signal = "🔴 REDUCE 33%"
+    elif underlying_trend == "WEAK":
+        base_signal = "🟠 PAUSE (Strategy Weak)"
+    elif price_sig == "STRONG":
+        base_signal = "🟢 BUY"
+    elif price_sig == "NEUTRAL" and pay_sig == "RISING":
+        base_signal = "🟢 ADD"
+    elif price_sig == "NEUTRAL":
+        base_signal = "🟡 HOLD"
+    elif price_sig == "WEAK":
+        base_signal = "🟠 PAUSE"
+
+    if market_regime == "BEAR":
+        if "BUY" in base_signal or "ADD" in base_signal:
+            return "🟡 HOLD (Market Bear)"
+        if "PAUSE" in base_signal:
+            return "🔴 REDUCE 33% (Market Bear)"
+
+    return base_signal
 
 # -------------------- UNDERLYING ANALYSIS --------------------
 underlying_trends = {}
 underlying_vol = {}
-underlying_momentum = {}
 
 for etf, u in UNDERLYING_MAP.items():
     underlying_trends[u] = price_trend_signal(u)
     underlying_vol[u] = volatility_regime(u)
-    underlying_momentum[u] = momentum_signal(u)
-
-# -------------------- FINAL SIGNAL --------------------
-def final_signal(ticker, price_sig, pay_sig, underlying_trend, momentum_sig):
-    last_sig = st.session_state.last_price_signal.get(ticker)
-
-    if underlying_trend == "WEAK" and price_sig == "WEAK" and last_sig == "WEAK":
-        base = "🔴 REDUCE 33%"
-    elif momentum_sig == "WEAK":
-        base = "🟠 PAUSE (Momentum)"
-    elif underlying_trend == "WEAK":
-        base = "🟠 PAUSE (Strategy Weak)"
-    elif price_sig == "STRONG":
-        base = "🟢 BUY"
-    elif price_sig == "NEUTRAL" and pay_sig == "RISING":
-        base = "🟢 ADD"
-    elif price_sig == "NEUTRAL":
-        base = "🟡 HOLD"
-    else:
-        base = "🟠 PAUSE"
-
-    if vix_state in ["HIGH", "PANIC"]:
-        if "BUY" in base or "ADD" in base:
-            return "🟡 HOLD (High Vol)"
-        if "PAUSE" in base:
-            return "🔴 REDUCE 33% (High Vol)"
-
-    if market_regime == "BEAR":
-        if "BUY" in base or "ADD" in base:
-            return "🟡 HOLD (Market Bear)"
-        if "PAUSE" in base:
-            return "🔴 REDUCE 33% (Market Bear)"
-
-    return base
-
 
 # -------------------- GLOBAL ETF HEALTH --------------------
 signals = {}
 price_signals = {}
+income_risks = {}
 
 for t in st.session_state.etfs:
     p = price_trend_signal(t)
     d = payout_signal(t)
+    ir = income_risk_signal(t)
     u = UNDERLYING_MAP.get(t)
     u_trend = underlying_trends.get(u, "NEUTRAL")
-    mom = underlying_momentum.get(u, "NEUTRAL")
-    f = final_signal(t, p, d, u_trend, mom)
+    f = final_signal(t, p, d, ir, u_trend)
     price_signals[t] = p
     signals[t] = f
+    income_risks[t] = ir
 
 st.session_state.last_price_signal = price_signals.copy()
 
@@ -243,32 +203,78 @@ for t, d in st.session_state.etfs.items():
 if st.session_state.peak_portfolio_value is None:
     st.session_state.peak_portfolio_value = total_value
 else:
-    st.session_state.peak_portfolio_value = max(st.session_state.peak_portfolio_value, total_value)
+    st.session_state.peak_portfolio_value = max(
+        st.session_state.peak_portfolio_value, total_value
+    )
 
-drawdown_pct = (total_value - st.session_state.peak_portfolio_value) / st.session_state.peak_portfolio_value * 100
+drawdown_pct = (
+    (total_value - st.session_state.peak_portfolio_value)
+    / st.session_state.peak_portfolio_value
+    * 100
+)
+
+income_change_pct = None
+if st.session_state.last_income_snapshot:
+    income_change_pct = (
+        (monthly_income - st.session_state.last_income_snapshot)
+        / st.session_state.last_income_snapshot
+        * 100
+    )
+
+# =========================================================
+# 🧠 PORTFOLIO RISK SCORING (NEW)
+# =========================================================
+risk_score = 0
+
+for v in signals.values():
+    if "REDUCE" in v:
+        risk_score += 25
+    elif "PAUSE" in v:
+        risk_score += 15
+
+for r in income_risks.values():
+    if r == "COLLAPSING":
+        risk_score += 30
+
+if market_regime == "BEAR":
+    risk_score += 20
+
+if drawdown_pct <= -15:
+    risk_score += 25
+elif drawdown_pct <= -8:
+    risk_score += 15
+
+for v in underlying_vol.values():
+    if v == "HIGH":
+        risk_score += 10
+
+risk_score = min(100, risk_score)
+
+if risk_score >= 76:
+    portfolio_risk = "🔴 CRITICAL"
+elif risk_score >= 51:
+    portfolio_risk = "🟠 HIGH"
+elif risk_score >= 26:
+    portfolio_risk = "🟡 MEDIUM"
+else:
+    portfolio_risk = "🟢 LOW"
 
 # -------------------- HEADER --------------------
 st.markdown("## 🔥 Dividend Strategy")
 
 # -------------------- KPI CARDS --------------------
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
+
 c1.metric("💼 Portfolio Value", f"${total_value:,.0f}")
 c2.metric("💸 Monthly Income", f"${monthly_income:,.2f}")
-c3.metric("📉 Drawdown", f"{drawdown_pct:.1f}%")
 
-status = "HEALTHY"
-if vix_state == "PANIC":
-    status = "DEFENSIVE (VIX PANIC)"
-elif vix_state == "HIGH":
-    status = "CAUTION (VIX)"
-elif market_regime == "BEAR":
-    status = "DEFENSIVE (Market)"
-elif drawdown_pct <= -15:
-    status = "DEFENSIVE"
-elif drawdown_pct <= -8:
-    status = "CAUTION"
+if income_change_pct is not None:
+    c3.metric("📉 Income Change", f"{income_change_pct:.1f}%", delta=f"{income_change_pct:.1f}%")
+else:
+    c3.metric("📉 Income Change", "—")
 
-c4.metric("🛡 Strategy Status", status)
+c4.metric("🛡 Strategy Status", portfolio_risk)
+c5.metric("🧠 Risk Score", f"{risk_score} / 100")
 
 # =========================================================
 # 📊 STRATEGY & ETF MONITOR
@@ -282,15 +288,15 @@ for t in st.session_state.etfs:
         t,
         price_signals.get(t),
         payout_signal(t),
+        income_risks.get(t),
         underlying_trends.get(u),
-        underlying_momentum.get(u),
         underlying_vol.get(u),
         signals.get(t),
     ])
 
 df = pd.DataFrame(
     rows,
-    columns=["ETF", "ETF Price", "Distribution", "Underlying Trend", "Momentum", "Underlying Vol", "Action"]
+    columns=["ETF", "ETF Price", "Distribution", "Income Risk", "Underlying Trend", "Underlying Vol", "Action"]
 )
 
 st.dataframe(df, use_container_width=True)
@@ -325,14 +331,13 @@ st.dataframe(trade_df, use_container_width=True)
 st.subheader("🚨 Income Shock Monitor")
 
 if st.session_state.last_income_snapshot:
-    change = (monthly_income - st.session_state.last_income_snapshot) / st.session_state.last_income_snapshot * 100
     st.write(f"Baseline: ${st.session_state.last_income_snapshot:,.2f}")
     st.write(f"Current: ${monthly_income:,.2f}")
-    st.write(f"Change: {change:.1f}%")
+    st.write(f"Change: {income_change_pct:.1f}%")
 
-    if change <= -25:
+    if income_change_pct <= -25:
         st.error("🔴 CRITICAL income collapse detected")
-    elif change <= -10:
+    elif income_change_pct <= -10:
         st.warning("🟠 Income weakening — monitor closely")
     else:
         st.success("🟢 Income stable")
@@ -476,4 +481,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.9.1 — momentum fallback + cached data reliability fix.")
+st.caption("v9.0 — portfolio-level risk scoring added for faster defensive response.")
