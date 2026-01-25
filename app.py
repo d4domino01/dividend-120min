@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-import io
+from datetime import datetime
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
@@ -121,23 +119,22 @@ with st.expander("📁 Portfolio", expanded=True):
 
     st.number_input("💰 Cash Wallet ($)", min_value=0.0, step=50.0, key="cash")
 
+    st.subheader("Portfolio Value by ETF")
+    chart_df = df.set_index("Ticker")["Value"]
+    st.bar_chart(chart_df)
+
 # -------------------- REQUIRED ACTIONS --------------------
 with st.expander("⚠️ Required Actions"):
 
     st.subheader("Buy / Sell Signals")
 
-    actions = []
-
     for _, r in df.iterrows():
         if r["Trend"] == "Down":
-            actions.append(f"🔴 {r['Ticker']}: Consider trimming or stop buying.")
+            st.error(f"{r['Ticker']}: Consider trimming or stop buying.")
         else:
-            actions.append(f"🟢 {r['Ticker']}: OK to accumulate.")
+            st.success(f"{r['Ticker']}: OK to accumulate.")
 
-    for a in actions:
-        st.write(a)
-
-    st.subheader("Allocation Optimizer (Whole Shares)")
+    st.subheader("Allocation Optimizer (Whole Shares Only)")
 
     if st.session_state.cash > 0:
         best = df.sort_values("Annual Income", ascending=False).iloc[0]
@@ -145,9 +142,12 @@ with st.expander("⚠️ Required Actions"):
 
         if price and price > 0:
             shares = int(st.session_state.cash // price)
-            st.success(
-                f"Invest in **{best['Ticker']}** → Buy **{shares} shares** (${shares*price:.2f})"
-            )
+            if shares > 0:
+                st.success(
+                    f"Buy **{shares} shares of {best['Ticker']}** (${shares*price:.2f})"
+                )
+            else:
+                st.warning("Not enough cash to buy 1 full share.")
         else:
             st.warning("Price data unavailable.")
     else:
@@ -177,25 +177,6 @@ with st.expander("📰 News & Events"):
 # -------------------- EXPORT & HISTORY --------------------
 with st.expander("📤 Export & History"):
 
-    # ---- CHART ----
-    fig, ax = plt.subplots()
-    ax.bar(df["Ticker"], df["Value"])
-    ax.set_title("Portfolio Value by ETF")
-
-    st.pyplot(fig)
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    buf.seek(0)
-
-    st.download_button(
-        "📸 Download Chart Snapshot",
-        data=buf,
-        file_name=f"portfolio_chart_{datetime.now().date()}.png",
-        mime="image/png"
-    )
-
-    # ---- CSV EXPORT ----
     csv = df.to_csv(index=False).encode("utf-8")
 
     st.download_button(
@@ -205,8 +186,7 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-    # ---- CSV IMPORT ----
-    st.subheader("Compare with Previous Snapshot")
+    st.subheader("Compare With Previous Snapshot")
 
     file = st.file_uploader("Upload snapshot CSV", type=["csv"])
 
@@ -219,10 +199,8 @@ with st.expander("📤 Export & History"):
 # -------------------- MARKET INTELLIGENCE --------------------
 with st.expander("🌍 Market Intelligence"):
 
-    st.write("Trend Summary:")
-    st.dataframe(df[["Ticker", "Trend"]])
-
+    st.dataframe(df[["Ticker", "Trend", "Weekly Div"]])
     st.write("Downtrends detected:", down_trends)
 
 # -------------------- FOOTER --------------------
-st.caption("vA+ UI organized • all strategy logic preserved • additive upgrades only")
+st.caption("vA+ stable cloud build • no removed strategy logic • organized sections")
