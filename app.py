@@ -61,16 +61,6 @@ def get_price(ticker):
         return None
 
 @st.cache_data(ttl=900)
-def get_auto_div(ticker):
-    try:
-        divs = yf.Ticker(ticker).dividends
-        if len(divs) == 0:
-            return 0.0
-        return round(divs[-1], 4)
-    except:
-        return 0.0
-
-@st.cache_data(ttl=900)
 def get_trend(ticker):
     try:
         df = yf.Ticker(ticker).history(period="1mo")
@@ -118,7 +108,6 @@ vol_regime_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
-    auto_div = get_auto_div(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
     regime, ratio = get_vol_regime(t)
@@ -138,7 +127,6 @@ for t in ETF_LIST:
         "Shares": shares,
         "Price": price,
         "Weekly Div": weekly_div,
-        "Auto Div": auto_div,
         "Annual Income": round(annual_income, 2),
         "Monthly Income": round(monthly_income, 2),
         "Value": round(value, 2),
@@ -149,29 +137,47 @@ for t in ETF_LIST:
 
 df = pd.DataFrame(rows)
 
-total_value = df["Value"].sum() + st.session_state.cash
-total_annual_income = df["Annual Income"].sum()
-total_monthly_income = total_annual_income / 12
+# ================= MARKET STRESS =================
+STRESS_MAP = {
+    "QDTE": ["QQQ", "AAPL", "MSFT"],
+    "CHPY": ["SOXX", "NVDA", "AMD"],
+    "XDTE": ["SPY", "VIX"]
+}
 
-# ================= MARKET CONDITION =================
-down = (df["Trend"] == "Down").sum()
+@st.cache_data(ttl=600)
+def get_stress_score(ticker):
+    try:
+        df = yf.Ticker(ticker).history(period="15d")
+        if len(df) < 10:
+            return 0
 
-if down >= 2:
-    market = "🔴 SELL / DEFENSIVE"
-elif down == 1:
-    market = "🟡 HOLD / CAUTION"
-else:
-    market = "🟢 BUY / ACCUMULATE"
+        prev = df["Close"].iloc[-2]
+        last = df["Close"].iloc[-1]
+        daily_pct = (last - prev) / prev * 100
 
-st.markdown(
-    f"<div style='padding:10px;border-radius:8px;background:#111'><b>🌍 Market Condition:</b> {market}</div>",
-    unsafe_allow_html=True,
-)
+        returns = df["Close"].pct_change().dropna()
+        vol = returns[-10:].std() * 100
 
-# ===================================================
-# =================== PORTFOLIO =====================
-# ===================================================
+        if daily_pct <= -2:
+            return 40
+        elif daily_pct <= -1:
+            return 20
+        elif vol > 3:
+            return 20
+        else:
+            return 0
+    except:
+        return 0
 
+stress_scores = {}
+
+for etf in ETF_LIST:
+    score = 0
+    for p in STRESS_MAP.get(etf, []):
+        score += get_stress_score(p)
+    stress_scores[etf] = min(score, 100)
+
+# ================= PORTFOLIO =================
 with st.expander("📁 Portfolio", expanded=True):
 
     for t in ETF_LIST:
@@ -193,98 +199,15 @@ with st.expander("📁 Portfolio", expanded=True):
 
         r = df[df.Ticker == t].iloc[0]
         st.caption(
-            f"Price: ${r.Price} | Drawdown: {r['Drawdown %']}% | Premium Regime: {r['Premium Regime']}"
+            f"Price: ${r.Price} | Drawdown: {r['Drawdown %']}% | Premium: {r['Premium Regime']} | Trend: {r.Trend}"
         )
-        st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
-    with c2:
-        st.metric("💸 Annual Income", f"${total_annual_income:,.2f}")
-    with c3:
-        st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
     st.session_state.cash = st.number_input(
         "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
     )
 
-save_to_browser({
-    "holdings": st.session_state.holdings,
-    "cash": st.session_state.cash
-})
-
-# ===================================================
-# ========== MARKET STRESS — PHASE 1 =================
-# ===================================================
-
-with st.expander("📉 Market Stress & Early Warnings"):
-
-    STRESS_MAP = {
-        "QDTE": ["QQQ", "AAPL", "MSFT"],
-        "CHPY": ["SOXX", "NVDA", "AMD"],
-        "XDTE": ["SPY", "VIX"]
-    }
-
-    @st.cache_data(ttl=600)
-    def get_stress_metrics(ticker):
-        try:
-            df = yf.Ticker(ticker).history(period="15d")
-            if len(df) < 10:
-                return None
-
-            prev = df["Close"].iloc[-2]
-            last = df["Close"].iloc[-1]
-            daily_pct = (last - prev) / prev * 100
-
-            returns = df["Close"].pct_change().dropna()
-            vol = returns[-10:].std() * 100
-
-            if "Volume" in df:
-                avg_vol = df["Volume"][-11:-1].mean()
-                today_vol = df["Volume"].iloc[-1]
-                vol_spike = today_vol / avg_vol if avg_vol > 0 else 1
-            else:
-                vol_spike = 1
-
-            return round(daily_pct,2), round(vol,2), round(vol_spike,2)
-
-        except:
-            return None
-
-    stress_scores = {}
-
-    for etf in ETF_LIST:
-        st.markdown(f"### {etf}")
-
-        proxies = STRESS_MAP.get(etf, [])
-        stress_score = 0
-
-        for p in proxies:
-            data = get_stress_metrics(p)
-
-            if data is None:
-                st.caption(f"{p}: data unavailable")
-                continue
-
-            daily, vol, vol_spike = data
-            msg = f"{p}: {daily}% | vol {vol}% | vol x{vol_spike}"
-
-            if daily <= -2 and vol_spike >= 1.5:
-                st.error("🚨 " + msg)
-                stress_score += 35
-            elif daily <= -1:
-                st.warning("⚠️ " + msg)
-                stress_score += 20
-            elif daily >= 2:
-                st.success("📈 " + msg)
-            else:
-                st.caption(msg)
-
-        stress_scores[etf] = stress_score
-        st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
-        st.divider()
+save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ===================================================
 # ========== PHASE 6 — ALLOCATION OPTIMIZER ==========
@@ -295,50 +218,68 @@ with st.expander("🎯 Allocation Optimizer (Phase 6)"):
     scores = {}
 
     for etf in ETF_LIST:
-        trend = df[df.Ticker == etf]["Trend"].iloc[0]
-        stress = stress_scores.get(etf, 0)
-        drawdown = drawdown_map.get(etf, 0)
-        regime = vol_regime_map.get(etf, "Normal")
-
         score = 0
-
-        if trend == "Up":
+        if df[df.Ticker == etf]["Trend"].iloc[0] == "Up":
             score += 30
-        if drawdown < 6:
+        if drawdown_map[etf] < 6:
             score += 25
-        if stress < 30:
+        if stress_scores[etf] < 30:
             score += 25
-        if regime in ["Normal", "High Premium"]:
+        if vol_regime_map[etf] in ["Normal", "High Premium"]:
             score += 20
-
         scores[etf] = score
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-    st.subheader("ETF Allocation Ranking")
     for etf, sc in ranked:
         st.write(f"**{etf}** → Score: {sc}/100")
 
-    st.divider()
-
     if st.session_state.cash > 0:
         best_etf = ranked[0][0]
-        best_price = df[df.Ticker == best_etf]["Price"].iloc[0]
-
-        if best_price and best_price > 0:
-            shares = int(st.session_state.cash // best_price)
-
+        price = df[df.Ticker == best_etf]["Price"].iloc[0]
+        if price:
+            shares = int(st.session_state.cash // price)
             if shares > 0:
-                st.success(
-                    f"💡 Best use of cash → Buy **{shares} shares of {best_etf}** "
-                    f"(${best_price} each)"
+                st.success(f"Buy **{shares} shares of {best_etf}** with available cash.")
+
+# ===================================================
+# ========== PHASE 7 — REBALANCE ENGINE ==============
+# ===================================================
+
+with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
+
+    # classify strength
+    strength = {}
+    for etf in ETF_LIST:
+        score = scores.get(etf, 0)
+        strength[etf] = score
+
+    strongest = max(strength, key=strength.get)
+    weakest = min(strength, key=strength.get)
+
+    if strongest != weakest and strength[strongest] - strength[weakest] >= 25:
+        weak_price = df[df.Ticker == weakest]["Price"].iloc[0]
+        strong_price = df[df.Ticker == strongest]["Price"].iloc[0]
+        weak_shares = st.session_state.holdings[weakest]["shares"]
+
+        if weak_price and strong_price and weak_shares > 0:
+            # suggest trimming 25% of weak position
+            trim_shares = max(1, int(weak_shares * 0.25))
+            cash_from_trim = trim_shares * weak_price
+            buy_shares = int(cash_from_trim // strong_price)
+
+            if buy_shares > 0:
+                st.warning(
+                    f"🔁 Consider trimming **{trim_shares} shares of {weakest}** "
+                    f"and adding **{buy_shares} shares of {strongest}** "
+                    f"to improve income stability."
                 )
             else:
-                st.warning("Not enough cash to buy 1 full share of any ETF.")
+                st.info("Rebalance detected but cash would not buy full shares.")
         else:
-            st.warning("Price data unavailable.")
+            st.info("No rebalance possible due to low position size or price data.")
     else:
-        st.info("Add cash to receive allocation suggestions.")
+        st.success("✅ Portfolio balance acceptable — no rebalance suggested now.")
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -347,53 +288,18 @@ with st.expander("🎯 Allocation Optimizer (Phase 6)"):
 with st.expander("📤 Export & History"):
 
     if st.button("🗑️ Reset Snapshot History"):
-        files = glob.glob(os.path.join(SNAP_DIR, "*.csv"))
-        for f in files:
+        for f in glob.glob(os.path.join(SNAP_DIR, "*.csv")):
             os.remove(f)
-        st.success("Snapshot history cleared. Start fresh from now.")
-
-    st.divider()
+        st.success("Snapshot history cleared.")
 
     if st.button("💾 Save Snapshot"):
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        path = os.path.join(SNAP_DIR, f"{ts}.csv")
-        df.to_csv(path, index=False)
+        df.to_csv(os.path.join(SNAP_DIR, f"{ts}.csv"), index=False)
         st.success("Snapshot saved.")
 
-        files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
-        if len(files) > MAX_SNAPSHOTS:
-            for f in files[:-MAX_SNAPSHOTS]:
-                os.remove(f)
-
-    st.divider()
-
-    snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
-
-    if snap_files:
-        hist = []
-        for f in snap_files:
-            d = pd.read_csv(f)
-            d["Date"] = os.path.basename(f).replace(".csv", "")
-            hist.append(d)
-
-        hist_df = pd.concat(hist)
-
-        st.subheader("📈 Monthly Income Trend")
-        st.line_chart(hist_df.groupby("Date")["Monthly Income"].sum())
-
-        st.subheader("📈 Portfolio Value Trend")
-        st.line_chart(hist_df.groupby("Date")["Value"].sum())
-    else:
-        st.info("No history yet. Save snapshots to start tracking trends.")
-
-    st.divider()
-
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "⬇️ Download Current Portfolio CSV",
-        data=csv,
-        file_name=f"portfolio_snapshot_{datetime.now().date()}.csv",
-        mime="text/csv"
-    )
+    st.download_button("⬇️ Download Portfolio CSV", data=csv,
+                       file_name=f"portfolio_{datetime.now().date()}.csv",
+                       mime="text/csv")
 
-st.caption("v16.0 • Phase-6 allocation optimizer • cash deployed where income probability is highest")
+st.caption("v17.0 • Phase-7 rebalance engine • rotate capital toward strongest income conditions")
