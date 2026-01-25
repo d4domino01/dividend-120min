@@ -6,8 +6,8 @@ from datetime import datetime
 # ================= PAGE =================
 st.set_page_config(page_title="Income Engine", layout="centered")
 
-st.markdown("### 📈 Income Strategy Engine")
-st.markdown("**Dividend Run-Up Monitor**")
+st.markdown("## 📈 Income Strategy Engine")
+st.caption("Dividend Run-Up Monitor")
 
 # ================= DEFAULT ETFS =================
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
@@ -94,7 +94,14 @@ elif down == 1:
 else:
     market = "🟢 BUY / ACCUMULATE"
 
-st.markdown(f"**🌍 Market:** {market}")
+st.markdown(
+    f"""
+<div style="padding:10px;border-radius:8px;background-color:#111;">
+<b>🌍 Market Condition:</b> {market}
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 # ===================================================
 # =================== PORTFOLIO =====================
@@ -103,7 +110,7 @@ st.markdown(f"**🌍 Market:** {market}")
 with st.expander("📁 Portfolio", expanded=True):
 
     for t in ETF_LIST:
-        st.markdown(f"**{t}**")
+        st.markdown(f"### {t}")
         c1, c2 = st.columns(2)
 
         with c1:
@@ -119,17 +126,16 @@ with st.expander("📁 Portfolio", expanded=True):
                 value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
             )
 
-        auto = df[df.Ticker == t]["Auto Div"].iloc[0]
-        price = df[df.Ticker == t]["Price"].iloc[0]
-        value = df[df.Ticker == t]["Value"].iloc[0]
-        income = df[df.Ticker == t]["Annual Income"].iloc[0]
-
-        st.caption(f"Price: ${price} | Auto div: {auto}")
-        st.caption(f"Value: ${value:.2f} | Annual income: ${income:.2f}")
+        r = df[df.Ticker == t].iloc[0]
+        st.caption(f"Price: ${r.Price} | Auto div: {r['Auto Div']}")
+        st.caption(f"Value: ${r.Value:.2f} | Annual income: ${r['Annual Income']:.2f}")
         st.divider()
 
-    st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
-    st.metric("💸 Annual Income", f"${total_income:,.2f}")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
+    with c2:
+        st.metric("💸 Annual Income", f"${total_income:,.2f}")
 
     st.session_state.cash = st.number_input(
         "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
@@ -156,7 +162,10 @@ with st.expander("⚠️ Required Actions"):
         if price and price > 0:
             shares = int(st.session_state.cash // price)
             if shares > 0:
-                st.success(f"Best use of cash → Buy **{shares} shares of {best['Ticker']}**")
+                st.success(
+                    f"Best use of cash → Buy **{shares} shares of {best['Ticker']}** "
+                    f"(${shares * price:.2f})"
+                )
             else:
                 st.warning("Not enough cash to buy 1 full share.")
         else:
@@ -183,7 +192,7 @@ with st.expander("🚨 Warnings & Risk"):
 with st.expander("📰 News & Events"):
 
     for t in ETF_LIST:
-        st.markdown(f"**{t}**")
+        st.markdown(f"### {t}")
         news = get_news(t)
         if news:
             for title, link in news:
@@ -219,4 +228,4 @@ with st.expander("📤 Export & History"):
 # ================= FOOTER ==========================
 # ===================================================
 
-st.caption("vA-mobile-fixed • inputs restored • populated sections • no removed logic")
+st.caption("Baseline locked • UI organized • strategy logic untouched")
