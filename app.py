@@ -4,6 +4,7 @@ import yfinance as yf
 from datetime import datetime
 import os, glob, json
 import streamlit.components.v1 as components
+import numpy as np
 
 # ================= PAGE =================
 st.markdown(
@@ -87,16 +88,43 @@ def get_drawdown(ticker):
     except:
         return 0
 
+@st.cache_data(ttl=900)
+def get_vol_regime(ticker):
+    try:
+        df = yf.Ticker(ticker).history(period="25d")
+        returns = df["Close"].pct_change().dropna()
+
+        short_vol = returns[-5:].std() * 100
+        long_vol = returns[-20:].std() * 100
+
+        if long_vol == 0:
+            return "Unknown", 0
+
+        ratio = short_vol / long_vol
+
+        if ratio < 0.6:
+            return "Low Premium", ratio
+        elif ratio > 1.3:
+            return "High Premium", ratio
+        else:
+            return "Normal", ratio
+    except:
+        return "Unknown", 0
+
 # ================= BUILD CURRENT DATA =================
 rows = []
 drawdown_map = {}
+vol_regime_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
     auto_div = get_auto_div(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
+    regime, ratio = get_vol_regime(t)
+
     drawdown_map[t] = drawdown
+    vol_regime_map[t] = regime
 
     shares = st.session_state.holdings[t]["shares"]
     weekly_div = st.session_state.holdings[t]["weekly_div"]
@@ -115,7 +143,8 @@ for t in ETF_LIST:
         "Monthly Income": round(monthly_income, 2),
         "Value": round(value, 2),
         "Trend": trend,
-        "Drawdown %": drawdown
+        "Drawdown %": drawdown,
+        "Premium Regime": regime
     })
 
 df = pd.DataFrame(rows)
@@ -163,8 +192,10 @@ with st.expander("📁 Portfolio", expanded=True):
             )
 
         r = df[df.Ticker == t].iloc[0]
-        st.caption(f"Price: ${r.Price} | Auto div: {r['Auto Div']} | Drawdown: {r['Drawdown %']}%")
-        st.caption(f"Value: ${r.Value:.2f} | Annual: ${r['Annual Income']:.2f} | Monthly: ${r['Monthly Income']:.2f}")
+        st.caption(
+            f"Price: ${r.Price} | Drawdown: {r['Drawdown %']}% | Premium Regime: {r['Premium Regime']}"
+        )
+        st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
 
     c1, c2, c3 = st.columns(3)
@@ -194,9 +225,6 @@ with st.expander("🚨 Warnings & Risk"):
     income_drop_map = {}
 
     for _, r in df.iterrows():
-        if r["Weekly Div"] == 0:
-            st.warning(f"{r['Ticker']}: Weekly distribution is 0.")
-            warnings_found = True
         if r["Trend"] == "Down":
             st.warning(f"{r['Ticker']}: Downtrend detected.")
             warnings_found = True
@@ -206,6 +234,8 @@ with st.expander("🚨 Warnings & Risk"):
         elif r["Drawdown %"] >= 6:
             st.warning(f"{r['Ticker']}: Price down {r['Drawdown %']}% from recent high.")
             warnings_found = True
+        if r["Premium Regime"] == "Low Premium":
+            st.warning(f"{r['Ticker']}: Option premium regime weakening.")
 
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
 
@@ -222,10 +252,9 @@ with st.expander("🚨 Warnings & Risk"):
             income_drop_map[r["Ticker"]] = r["Income Drop %"]
             if r["Income Drop %"] > 5:
                 st.warning(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% since last snapshot.")
-                warnings_found = True
 
     if not warnings_found:
-        st.success("✅ No immediate risks detected in your ETFs.")
+        st.success("✅ No immediate capital risks detected.")
 
 # ===================================================
 # ========== MARKET STRESS — PHASE 1 =================
@@ -308,28 +337,29 @@ with st.expander("📉 Market Stress & Early Warnings"):
         st.divider()
 
 # ===================================================
-# ========== PHASE 3 + 4 — ACTION ENGINE =============
+# ========== PHASE 3 + 4 + 5 — ACTION ENGINE =========
 # ===================================================
 
-with st.expander("🧠 Strategy Signals (Phase 3+4)"):
+with st.expander("🧠 Strategy Signals (Phase 3+4+5)"):
 
     for etf in ETF_LIST:
         trend = df[df.Ticker == etf]["Trend"].iloc[0]
         stress = stress_scores.get(etf, 0)
         income_drop = income_drop_map.get(etf, 0)
         drawdown = drawdown_map.get(etf, 0)
+        regime = vol_regime_map.get(etf, "Normal")
 
-        # 🔴 SELL: capital damage + market pressure
+        # 🔴 SELL: capital damage + pressure
         if drawdown >= 10 and (stress >= 30 or trend == "Down"):
-            st.error(f"{etf}: 🔴 SELL / REDUCE — price drawdown {drawdown}% with market pressure")
+            st.error(f"{etf}: 🔴 SELL / REDUCE — capital erosion detected")
 
-        # 🟡 HOLD: early capital risk or stress
-        elif drawdown >= 6 or stress >= 30 or trend == "Down" or income_drop > 5:
-            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — protect capital, avoid adding")
+        # 🟡 HOLD: weak regime or rising risk
+        elif drawdown >= 6 or stress >= 30 or trend == "Down" or regime == "Low Premium":
+            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — option premium or price pressure")
 
-        # 🟢 ACCUMULATE: healthy trend & low stress
+        # 🟢 ACCUMULATE: healthy environment
         else:
-            st.success(f"{etf}: 🟢 ACCUMULATE — price stable, trend positive")
+            st.success(f"{etf}: 🟢 ACCUMULATE — strong income regime")
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -387,4 +417,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v14.0 • Phase-4 capital drawdown protection • price-first risk management for weekly ETFs")
+st.caption("v15.0 • Phase-5 option premium regime detection • capital-first income strategy")
