@@ -258,7 +258,7 @@ if st.session_state.last_income_snapshot:
     )
 
 # -------------------- HEADER --------------------
-st.markdown("## 💰 Dividend Strategy — v9.1")
+st.markdown("## 💰 Dividend Strategy — v9.2")
 
 # -------------------- KPI CARDS --------------------
 c1, c2, c3, c4 = st.columns(4)
@@ -290,7 +290,7 @@ elif any("🟠" in v for v in signals.values()):
 c4.metric("🛡 Strategy Status", status)
 
 # =========================================================
-# 🧠 PORTFOLIO CORRELATION RISK
+# 🧠 SYSTEMIC CORRELATION RISK
 # =========================================================
 st.subheader("🧠 Systemic Correlation Risk")
 
@@ -507,5 +507,81 @@ with st.expander("📈 Save Portfolio Snapshot"):
         })
         st.success("Snapshot saved.")
 
+# =========================================================
+# 🧮 PORTFOLIO RISK SCORE (NEW)
+# =========================================================
+st.subheader("🧮 Portfolio Risk Score (0–100)")
+
+risk = 0
+
+if corr_level == "HIGH":
+    risk += 30
+elif corr_level == "ELEVATED":
+    risk += 15
+
+if market_regime == "BEAR":
+    risk += 20
+
+if drawdown_pct <= -15:
+    risk += 25
+elif drawdown_pct <= -8:
+    risk += 15
+
+if any(v == "COLLAPSING" for v in income_risks.values()):
+    risk += 20
+
+if any("🔴" in v for v in signals.values()):
+    risk += 15
+
+risk = min(risk, 100)
+
+st.metric("Overall Portfolio Risk", f"{risk} / 100")
+
+if risk >= 70:
+    st.error("🔴 Extreme risk — capital preservation mode recommended")
+elif risk >= 40:
+    st.warning("🟠 Elevated risk — reduce aggression")
+else:
+    st.success("🟢 Risk within acceptable range")
+
+# =========================================================
+# 📂 CSV IMPORT & COMPARISON (NEW)
+# =========================================================
+st.subheader("📂 Import Portfolio CSV for Comparison")
+
+uploaded = st.file_uploader("Upload previous portfolio snapshot (CSV)", type=["csv"])
+
+if uploaded:
+    try:
+        df_old = pd.read_csv(uploaded)
+        st.write("### Imported Portfolio")
+        st.dataframe(df_old, use_container_width=True)
+
+        if {"ETF", "Shares", "Value", "Monthly Income"}.issubset(df_old.columns):
+            old_value = df_old["Value"].sum()
+            old_income = df_old["Monthly Income"].sum()
+
+            st.write("### Comparison vs Current")
+            st.write(f"Old Portfolio Value: ${old_value:,.0f}")
+            st.write(f"Current Portfolio Value: ${total_value:,.0f}")
+
+            st.write(f"Old Monthly Income: ${old_income:,.2f}")
+            st.write(f"Current Monthly Income: ${monthly_income:,.2f}")
+
+            if total_value < old_value:
+                st.error("🔴 Portfolio value has declined since snapshot")
+            else:
+                st.success("🟢 Portfolio value improved vs snapshot")
+
+            if monthly_income < old_income:
+                st.warning("🟠 Income lower than previous snapshot")
+            else:
+                st.success("🟢 Income improved vs snapshot")
+        else:
+            st.info("CSV must contain columns: ETF, Shares, Value, Monthly Income")
+
+    except Exception as e:
+        st.error("Could not read CSV file")
+
 # -------------------- FOOTER --------------------
-st.caption("v9.1 — systemic correlation risk added for early crash detection.")
+st.caption("v9.2 — portfolio risk scoring + CSV comparison added for early deterioration detection.")
