@@ -6,10 +6,11 @@ import os, glob, json
 import streamlit.components.v1 as components
 
 # ================= PAGE =================
-st.set_page_config(page_title="Income Engine", layout="centered")
-
-st.markdown("## 📈 Income Strategy Engine")
-st.caption("Dividend Run-Up Monitor")
+st.markdown(
+    "<div style='font-size:22px; font-weight:700;'>📈 Income Strategy Engine</div>"
+    "<div style='font-size:13px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
+    unsafe_allow_html=True
+)
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
