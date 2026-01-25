@@ -77,13 +77,26 @@ def get_trend(ticker):
     except:
         return "Unknown"
 
+@st.cache_data(ttl=900)
+def get_drawdown(ticker):
+    try:
+        df = yf.Ticker(ticker).history(period="1mo")
+        high = df["Close"].max()
+        last = df["Close"].iloc[-1]
+        return round((high - last) / high * 100, 2)
+    except:
+        return 0
+
 # ================= BUILD CURRENT DATA =================
 rows = []
+drawdown_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
     auto_div = get_auto_div(t)
     trend = get_trend(t)
+    drawdown = get_drawdown(t)
+    drawdown_map[t] = drawdown
 
     shares = st.session_state.holdings[t]["shares"]
     weekly_div = st.session_state.holdings[t]["weekly_div"]
@@ -101,7 +114,8 @@ for t in ETF_LIST:
         "Annual Income": round(annual_income, 2),
         "Monthly Income": round(monthly_income, 2),
         "Value": round(value, 2),
-        "Trend": trend
+        "Trend": trend,
+        "Drawdown %": drawdown
     })
 
 df = pd.DataFrame(rows)
@@ -149,7 +163,7 @@ with st.expander("📁 Portfolio", expanded=True):
             )
 
         r = df[df.Ticker == t].iloc[0]
-        st.caption(f"Price: ${r.Price} | Auto div: {r['Auto Div']}")
+        st.caption(f"Price: ${r.Price} | Auto div: {r['Auto Div']} | Drawdown: {r['Drawdown %']}%")
         st.caption(f"Value: ${r.Value:.2f} | Annual: ${r['Annual Income']:.2f} | Monthly: ${r['Monthly Income']:.2f}")
         st.divider()
 
@@ -181,16 +195,22 @@ with st.expander("🚨 Warnings & Risk"):
 
     for _, r in df.iterrows():
         if r["Weekly Div"] == 0:
-            st.error(f"{r['Ticker']}: Weekly distribution is 0.")
+            st.warning(f"{r['Ticker']}: Weekly distribution is 0.")
             warnings_found = True
         if r["Trend"] == "Down":
             st.warning(f"{r['Ticker']}: Downtrend detected.")
+            warnings_found = True
+        if r["Drawdown %"] >= 10:
+            st.error(f"{r['Ticker']}: Price drawdown {r['Drawdown %']}% from recent high.")
+            warnings_found = True
+        elif r["Drawdown %"] >= 6:
+            st.warning(f"{r['Ticker']}: Price down {r['Drawdown %']}% from recent high.")
             warnings_found = True
 
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
 
     if snap_files:
-        old = pd.read_csv(snap_files[-1])  # most recent snapshot
+        old = pd.read_csv(snap_files[-1])
         merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
 
         merged["Income Drop %"] = (
@@ -200,13 +220,8 @@ with st.expander("🚨 Warnings & Risk"):
 
         for _, r in merged.iterrows():
             income_drop_map[r["Ticker"]] = r["Income Drop %"]
-
             if r["Income Drop %"] > 5:
                 st.warning(f"{r['Ticker']}: Income down {r['Income Drop %']:.1f}% since last snapshot.")
-                warnings_found = True
-
-            if r["Weekly Div_Now"] < r["Weekly Div_Old"]:
-                st.warning(f"{r['Ticker']}: Weekly distribution lower than last snapshot.")
                 warnings_found = True
 
     if not warnings_found:
@@ -293,28 +308,28 @@ with st.expander("📉 Market Stress & Early Warnings"):
         st.divider()
 
 # ===================================================
-# ========== PHASE 3 — ACTION ENGINE (WEEKLY ETFs) ===
+# ========== PHASE 3 + 4 — ACTION ENGINE =============
 # ===================================================
 
-with st.expander("🧠 Strategy Signals (Phase 3)"):
+with st.expander("🧠 Strategy Signals (Phase 3+4)"):
 
     for etf in ETF_LIST:
         trend = df[df.Ticker == etf]["Trend"].iloc[0]
         stress = stress_scores.get(etf, 0)
         income_drop = income_drop_map.get(etf, 0)
+        drawdown = drawdown_map.get(etf, 0)
 
-        # ---- WEEKLY ETF LOGIC ----
-        # SELL only if market stress is HIGH and trend is DOWN
-        if stress >= 60 and trend == "Down":
-            st.error(f"{etf}: 🔴 SELL / REDUCE — sustained market stress + downtrend")
+        # 🔴 SELL: capital damage + market pressure
+        if drawdown >= 10 and (stress >= 30 or trend == "Down"):
+            st.error(f"{etf}: 🔴 SELL / REDUCE — price drawdown {drawdown}% with market pressure")
 
-        # HOLD if moderate stress, downtrend, or income weakening
-        elif stress >= 30 or trend == "Down" or income_drop > 5:
-            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — weekly income volatility or market pressure")
+        # 🟡 HOLD: early capital risk or stress
+        elif drawdown >= 6 or stress >= 30 or trend == "Down" or income_drop > 5:
+            st.warning(f"{etf}: 🟡 HOLD / DEFENSIVE — protect capital, avoid adding")
 
-        # Otherwise accumulate
+        # 🟢 ACCUMULATE: healthy trend & low stress
         else:
-            st.success(f"{etf}: 🟢 ACCUMULATE — normal weekly fluctuations, trend acceptable")
+            st.success(f"{etf}: 🟢 ACCUMULATE — price stable, trend positive")
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -372,4 +387,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v13.2 • Phase-3 adjusted for WEEKLY income ETFs • no panic selling on normal dividend changes")
+st.caption("v14.0 • Phase-4 capital drawdown protection • price-first risk management for weekly ETFs")
