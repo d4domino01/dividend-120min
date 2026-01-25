@@ -1,140 +1,206 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
+from datetime import datetime
 
-# -------------------- CONFIG --------------------
-st.set_page_config(page_title="Income Strategy Engine", layout="centered")
+# ================= PAGE =================
+st.set_page_config(page_title="Income Engine", layout="centered")
 
-st.title("📈 Income Strategy Engine")
+st.markdown("## 📈 Income Strategy Engine")
+st.markdown("Dividend Income Monitor")
 
-# -------------------- DEFAULT ETFs --------------------
-ETFS = {
-    "QDTE": {"shares": 0},
-    "CHPY": {"shares": 0},
-    "XDTE": {"shares": 0},
-}
+# ================= ETFS =================
+ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
-# -------------------- HELPERS --------------------
-@st.cache_data(ttl=1800)
-def get_market_data(ticker):
+if "holdings" not in st.session_state:
+    st.session_state.holdings = {
+        t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST
+    }
+
+if "cash" not in st.session_state:
+    st.session_state.cash = 0.0
+
+# ================= DATA =================
+@st.cache_data(ttl=900)
+def get_price(ticker):
     try:
-        t = yf.Ticker(ticker)
-        price = t.history(period="1d")["Close"].iloc[-1]
-        info = t.info
-
-        # Try to estimate weekly dividend
-        annual_div = info.get("trailingAnnualDividendRate", 0) or 0
-        weekly_div = annual_div / 52 if annual_div else 0
-
-        return round(price, 2), round(weekly_div, 3)
+        return round(yf.Ticker(ticker).history(period="5d")["Close"].iloc[-1], 2)
     except:
-        return 0.0, 0.0
+        return None
 
+@st.cache_data(ttl=900)
+def get_trend(ticker):
+    try:
+        df = yf.Ticker(ticker).history(period="1mo")
+        return "Up" if df["Close"].iloc[-1] > df["Close"].iloc[0] else "Down"
+    except:
+        return "Unknown"
 
-# -------------------- PORTFOLIO TOTALS --------------------
-total_value = 0
-total_annual_income = 0
-total_weekly_income = 0
+@st.cache_data(ttl=1800)
+def get_news(ticker):
+    try:
+        news = yf.Ticker(ticker).news[:5]
+        return [(n["title"], n["link"]) for n in news]
+    except:
+        return []
 
-# -------------------- ETF INPUTS --------------------
-st.subheader("📦 Holdings")
+# ================= BUILD PORTFOLIO =================
+rows = []
 
-for ticker in ETFS:
+for t in ETF_LIST:
+    price = get_price(t)
+    trend = get_trend(t)
 
-    price, auto_div = get_market_data(ticker)
+    shares = st.session_state.holdings[t]["shares"]
+    weekly_div = st.session_state.holdings[t]["weekly_div"]
 
-    with st.container():
-        st.markdown(f"### {ticker}")
+    annual_income = shares * weekly_div * 52
+    value = (price or 0) * shares
 
-        col1, col2 = st.columns(2)
+    rows.append({
+        "Ticker": t,
+        "Shares": shares,
+        "Price": price,
+        "Weekly Div": weekly_div,
+        "Annual Income": round(annual_income, 2),
+        "Value": round(value, 2),
+        "Trend": trend
+    })
 
-        with col1:
-            shares = st.number_input(
-                "Shares",
-                min_value=0.0,
-                step=1.0,
-                key=f"{ticker}_shares",
-                value=float(ETFS[ticker]["shares"]),
+df = pd.DataFrame(rows)
+
+total_value = df["Value"].sum() + st.session_state.cash
+total_income = df["Annual Income"].sum()
+
+# ================= MARKET CONDITION =================
+down = (df["Trend"] == "Down").sum()
+
+if down >= 2:
+    market = "🔴 SELL / DEFENSIVE"
+elif down == 1:
+    market = "🟡 HOLD / CAUTION"
+else:
+    market = "🟢 BUY / ACCUMULATE"
+
+st.markdown(f"### 🌍 Market Condition: {market}")
+
+# ===================================================
+# =================== PORTFOLIO =====================
+# ===================================================
+
+with st.expander("📁 Portfolio", expanded=True):
+
+    for t in ETF_LIST:
+        st.markdown(f"**{t}**")
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares", min_value=0, step=1,
+                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
             )
 
-        with col2:
-            weekly_override = st.number_input(
+        with c2:
+            st.session_state.holdings[t]["weekly_div"] = st.number_input(
                 "Weekly Distribution ($)",
-                min_value=0.0,
-                step=0.01,
-                value=0.0,
-                key=f"{ticker}_weekly_override",
+                min_value=0.0, step=0.01,
+                value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
             )
 
-        use_div = weekly_override if weekly_override > 0 else auto_div
-
-        value = shares * price
-        weekly_income = shares * use_div
-        annual_income = weekly_income * 52
-        monthly_income = annual_income / 12
-
-        total_value += value
-        total_annual_income += annual_income
-        total_weekly_income += weekly_income
-
-        st.caption(f"Price: ${price:.2f} | Auto div: {auto_div:.3f}")
-
-        st.success(
-            f"Value: {value:,.2f}  |  Weekly: {weekly_income:,.2f}  |  "
-            f"Monthly: {monthly_income:,.2f}  |  Annual: {annual_income:,.2f}"
-        )
-
+        r = df[df.Ticker == t].iloc[0]
+        st.caption(f"Price: ${r.Price} | Value: ${r.Value:.2f} | Annual Income: ${r['Annual Income']:.2f}")
         st.divider()
 
-# -------------------- CASH WALLET --------------------
-st.subheader("💰 Cash Wallet ($)")
-cash = st.number_input("Available Cash", min_value=0.0, step=10.0, value=50.0)
+    st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
+    st.metric("💸 Annual Income", f"${total_income:,.2f}")
 
-# -------------------- PORTFOLIO SUMMARY --------------------
-st.subheader("📊 Portfolio Summary")
-
-portfolio_monthly = total_annual_income / 12
-
-st.metric("📦 Portfolio Value", f"${total_value:,.2f}")
-st.metric("💵 Monthly Income", f"${portfolio_monthly:,.2f}")
-st.metric("📆 Annual Income", f"${total_annual_income:,.2f}")
-
-# -------------------- REQUIRED ACTIONS --------------------
-with st.expander("⚠️ Required Actions"):
-    if portfolio_monthly < 250:
-        st.warning("Monthly income below target — consider adding capital or reallocating.")
-    else:
-        st.success("Income trend acceptable.")
-
-    if cash > 100:
-        st.info("You have idle cash available for deployment.")
-
-# -------------------- WARNINGS & RISK --------------------
-with st.expander("🚨 Warnings & Risk"):
-    st.write("• High-yield ETFs can cut distributions.")
-    st.write("• NAV erosion risk with covered-call strategies.")
-    st.write("• Monitor dividend consistency monthly.")
-
-# -------------------- NEWS & EVENTS --------------------
-with st.expander("📰 News & Events"):
-    st.write("ETF and underlying-stock news feed coming next.")
-    st.write("Will flag earnings weeks, dividend changes, and volatility spikes.")
-
-# -------------------- EXPORT & HISTORY --------------------
-with st.expander("📁 Export & History"):
-    data = {
-        "Portfolio Value": [total_value],
-        "Monthly Income": [portfolio_monthly],
-        "Annual Income": [total_annual_income],
-        "Cash": [cash],
-    }
-    df = pd.DataFrame(data)
-    st.download_button(
-        "Download Snapshot (CSV)",
-        df.to_csv(index=False),
-        file_name="portfolio_snapshot.csv",
-        mime="text/csv",
+    st.session_state.cash = st.number_input(
+        "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
     )
 
-# -------------------- FOOTER --------------------
-st.caption("Income Strategy Engine — built for fast reaction to market & dividend changes.")
+# ===================================================
+# ================= REQUIRED ACTIONS ================
+# ===================================================
+
+with st.expander("⚠️ Required Actions"):
+
+    for _, r in df.iterrows():
+        if r["Trend"] == "Down":
+            st.error(f"{r['Ticker']}: Downtrend — avoid adding / consider trimming.")
+        else:
+            st.success(f"{r['Ticker']}: Trend OK for buying.")
+
+    st.divider()
+
+    if st.session_state.cash > 0:
+        best = df.sort_values("Annual Income", ascending=False).iloc[0]
+        price = best["Price"]
+
+        if price and price > 0:
+            shares = int(st.session_state.cash // price)
+            if shares > 0:
+                st.success(f"Best use of cash → Buy **{shares} shares of {best['Ticker']}**")
+            else:
+                st.warning("Not enough cash to buy 1 full share.")
+        else:
+            st.warning("Price unavailable.")
+    else:
+        st.info("Add cash to get buy suggestions.")
+
+# ===================================================
+# ================= WARNINGS ========================
+# ===================================================
+
+with st.expander("🚨 Warnings & Risk"):
+
+    for _, r in df.iterrows():
+        if r["Weekly Div"] == 0:
+            st.error(f"{r['Ticker']}: Weekly distribution is 0.")
+        if r["Trend"] == "Down":
+            st.warning(f"{r['Ticker']}: Price trend is down.")
+
+# ===================================================
+# ================= NEWS ============================
+# ===================================================
+
+with st.expander("📰 News & Events"):
+
+    for t in ETF_LIST:
+        st.markdown(f"**{t}**")
+        news = get_news(t)
+        if news:
+            for title, link in news:
+                st.markdown(f"- [{title}]({link})")
+        else:
+            st.caption("No recent news.")
+
+# ===================================================
+# ================= EXPORT ==========================
+# ===================================================
+
+with st.expander("📤 Export & History"):
+
+    csv = df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "⬇️ Download Portfolio CSV",
+        data=csv,
+        file_name=f"portfolio_snapshot_{datetime.now().date()}.csv",
+        mime="text/csv"
+    )
+
+    file = st.file_uploader("Upload Snapshot CSV to Compare", type=["csv"])
+
+    if file:
+        old = pd.read_csv(file)
+        merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
+        merged["Value Change"] = merged["Value_Now"] - merged["Value_Old"]
+        merged["Income Change"] = merged["Annual Income_Now"] - merged["Annual Income_Old"]
+        st.dataframe(merged)
+
+# ===================================================
+# ================= FOOTER ==========================
+# ===================================================
+
+st.caption("Stable baseline • full inputs • no hidden logic • mobile friendly")
