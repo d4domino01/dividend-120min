@@ -240,33 +240,59 @@ with st.expander("🚨 Warnings & Risk"):
 # ================= NEWS ============================
 # ===================================================
 
-with st.expander("📰 News & Events"):
-UNDERLYING_MAP = {
-    "QDTE": ["QQQ", "MSFT", "AAPL"],   # Nasdaq drivers
-    "CHPY": ["SOXX", "NVDA", "AMD"],   # Semiconductor stress
-    "XDTE": ["SPY", "VIX"],            # Market + volatility
-}
+with st.expander("📉 Market Stress & Early Warnings"):
 
-    for t in ETF_LIST:
-        st.markdown(f"### {t}")
+    # Proxies that actually move your ETFs
+    STRESS_MAP = {
+        "QDTE": ["QQQ", "AAPL", "MSFT"],
+        "CHPY": ["SOXX", "NVDA", "AMD"],
+        "XDTE": ["SPY", "VIX"]
+    }
 
-        etf_news = get_news(t)
-        if etf_news:
-            st.markdown("**ETF News:**")
-            for title, link in etf_news:
-                st.markdown(f"- [{title}]({link})")
+    @st.cache_data(ttl=600)
+    def get_daily_change(ticker):
+        try:
+            df = yf.Ticker(ticker).history(period="5d")
+            if len(df) < 2:
+                return None
+            prev = df["Close"].iloc[-2]
+            last = df["Close"].iloc[-1]
+            return round((last - prev) / prev * 100, 2)
+        except:
+            return None
+
+    for etf in ETF_LIST:
+        st.markdown(f"### {etf}")
+
+        proxies = STRESS_MAP.get(etf, [])
+
+        stress_count = 0
+
+        for p in proxies:
+            chg = get_daily_change(p)
+
+            if chg is None:
+                st.caption(f"{p}: data unavailable")
+                continue
+
+            if chg <= -2:
+                st.error(f"{p}: {chg}% today — strong downside pressure")
+                stress_count += 2
+            elif chg <= -1:
+                st.warning(f"{p}: {chg}% today — moderate weakness")
+                stress_count += 1
+            elif chg >= 2:
+                st.success(f"{p}: +{chg}% — strong upside momentum")
+            else:
+                st.caption(f"{p}: {chg}%")
+
+        # ---- ETF LEVEL ASSESSMENT ----
+        if stress_count >= 3:
+            st.error("🚨 High stress environment for this ETF.")
+        elif stress_count >= 1:
+            st.warning("⚠️ Some market weakness detected.")
         else:
-            st.caption("No recent ETF news.")
-
-        if t in UNDERLYING_MAP:
-            for u in UNDERLYING_MAP[t]:
-                st.markdown(f"**Underlying: {u}**")
-                u_news = get_news(u)
-                if u_news:
-                    for title, link in u_news:
-                        st.markdown(f"- [{title}]({link})")
-                else:
-                    st.caption("No recent underlying news.")
+            st.success("✅ No major stress signals detected.")
 
         st.divider()
 
