@@ -66,6 +66,7 @@ for t in ETF_LIST:
     weekly_div = st.session_state.holdings[t]["weekly_div"]
 
     annual_income = shares * weekly_div * 52
+    monthly_income = annual_income / 12
     value = (price or 0) * shares
 
     rows.append({
@@ -75,6 +76,7 @@ for t in ETF_LIST:
         "Weekly Div": weekly_div,
         "Auto Div": auto_div,
         "Annual Income": round(annual_income, 2),
+        "Monthly Income": round(monthly_income, 2),
         "Value": round(value, 2),
         "Trend": trend
     })
@@ -82,7 +84,8 @@ for t in ETF_LIST:
 df = pd.DataFrame(rows)
 
 total_value = df["Value"].sum() + st.session_state.cash
-total_income = df["Annual Income"].sum()
+total_annual_income = df["Annual Income"].sum()
+total_monthly_income = total_annual_income / 12
 
 # ================= MARKET CONDITION =================
 down = (df["Trend"] == "Down").sum()
@@ -128,14 +131,16 @@ with st.expander("📁 Portfolio", expanded=True):
 
         r = df[df.Ticker == t].iloc[0]
         st.caption(f"Price: ${r.Price} | Auto div: {r['Auto Div']}")
-        st.caption(f"Value: ${r.Value:.2f} | Annual income: ${r['Annual Income']:.2f}")
+        st.caption(f"Value: ${r.Value:.2f} | Annual: ${r['Annual Income']:.2f} | Monthly: ${r['Monthly Income']:.2f}")
         st.divider()
 
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
     with c2:
-        st.metric("💸 Annual Income", f"${total_income:,.2f}")
+        st.metric("💸 Annual Income", f"${total_annual_income:,.2f}")
+    with c3:
+        st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
     st.session_state.cash = st.number_input(
         "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
@@ -228,4 +233,4 @@ with st.expander("📤 Export & History"):
 # ================= FOOTER ==========================
 # ===================================================
 
-st.caption("Baseline locked • UI organized • strategy logic untouched")
+st.caption("Baseline locked • Monthly income added • strategy logic untouched")
