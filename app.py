@@ -241,7 +241,6 @@ with st.expander("🚨 Warnings & Risk"):
 # ===================================================
 
 with st.expander("📰 News & Events"):
-
 UNDERLYING_MAP = {
     "QDTE": ["QQQ", "MSFT", "AAPL"],   # Nasdaq drivers
     "CHPY": ["SOXX", "NVDA", "AMD"],   # Semiconductor stress
