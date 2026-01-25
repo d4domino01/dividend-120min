@@ -276,11 +276,7 @@ with st.expander("📰 News & Events"):
 # ===================================================
 
 with st.expander("📤 Export & History"):
-if st.button("🗑️ Reset Snapshot History"):
-        files = glob.glob(os.path.join(SNAP_DIR, "*.csv"))
-        for f in files:
-            os.remove(f)
-        st.success("Snapshot history cleared. Start fresh from now.")
+
 
     if st.button("💾 Save Snapshot"):
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
