@@ -4,6 +4,7 @@ import yfinance as yf
 from datetime import datetime
 import os
 import glob
+import json
 
 # ================= PAGE =================
 st.set_page_config(page_title="Income Engine", layout="centered")
@@ -12,17 +13,45 @@ st.markdown("## 📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
+
 SNAP_DIR = "snapshots"
+STATE_FILE = "portfolio_state.json"
 MAX_SNAPSHOTS = 14
 
 os.makedirs(SNAP_DIR, exist_ok=True)
 
+# ================= LOAD SAVED STATE =================
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return None
+    return None
+
+def save_state():
+    state = {
+        "holdings": st.session_state.holdings,
+        "cash": st.session_state.cash
+    }
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+saved = load_state()
+
 # ================= SESSION =================
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
+    if saved and "holdings" in saved:
+        st.session_state.holdings = saved["holdings"]
+    else:
+        st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
 
 if "cash" not in st.session_state:
-    st.session_state.cash = 0.0
+    if saved and "cash" in saved:
+        st.session_state.cash = saved["cash"]
+    else:
+        st.session_state.cash = 0.0
 
 # ================= DATA =================
 @st.cache_data(ttl=900)
@@ -119,14 +148,16 @@ with st.expander("📁 Portfolio", expanded=True):
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
                 "Shares", min_value=0, step=1,
-                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
+                value=st.session_state.holdings[t]["shares"], key=f"s_{t}",
+                on_change=save_state
             )
 
         with c2:
             st.session_state.holdings[t]["weekly_div"] = st.number_input(
                 "Weekly Distribution ($)",
                 min_value=0.0, step=0.01,
-                value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
+                value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}",
+                on_change=save_state
             )
 
         r = df[df.Ticker == t].iloc[0]
@@ -142,7 +173,10 @@ with st.expander("📁 Portfolio", expanded=True):
     with c3:
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
-    st.session_state.cash = st.number_input("💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash)
+    st.session_state.cash = st.number_input(
+        "💰 Cash Wallet ($)", min_value=0.0, step=50.0,
+        value=st.session_state.cash, on_change=save_state
+    )
 
 # ===================================================
 # ================= REQUIRED ACTIONS ================
@@ -163,8 +197,6 @@ with st.expander("⚠️ Required Actions"):
             shares = int(st.session_state.cash // price)
             if shares > 0:
                 st.success(f"Best use of cash → Buy {shares} shares of {best['Ticker']}")
-            else:
-                st.warning("Not enough cash to buy 1 full share.")
 
 # ===================================================
 # ================= WARNINGS & RISK =================
@@ -174,7 +206,6 @@ with st.expander("🚨 Warnings & Risk"):
 
     warnings_found = False
 
-    # ---- basic checks ----
     for _, r in df.iterrows():
         if r["Weekly Div"] == 0:
             st.error(f"{r['Ticker']}: Weekly distribution is 0.")
@@ -183,10 +214,9 @@ with st.expander("🚨 Warnings & Risk"):
             st.warning(f"{r['Ticker']}: Downtrend detected.")
             warnings_found = True
 
-    # ---- history based checks ----
     snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
     if snap_files:
-        old = pd.read_csv(snap_files[0])  # oldest in window
+        old = pd.read_csv(snap_files[0])
         merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Old"))
 
         merged["Income Drop %"] = (
@@ -252,7 +282,6 @@ with st.expander("📤 Export & History"):
         df.to_csv(path, index=False)
         st.success("Snapshot saved.")
 
-        # cleanup old
         files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
         if len(files) > MAX_SNAPSHOTS:
             for f in files[:-MAX_SNAPSHOTS]:
@@ -270,12 +299,10 @@ with st.expander("📤 Export & History"):
         hist_df = pd.concat(hist)
 
         st.subheader("📈 Monthly Income Trend")
-        income_trend = hist_df.groupby("Date")["Monthly Income"].sum()
-        st.line_chart(income_trend)
+        st.line_chart(hist_df.groupby("Date")["Monthly Income"].sum())
 
         st.subheader("📈 Portfolio Value Trend")
-        value_trend = hist_df.groupby("Date")["Value"].sum()
-        st.line_chart(value_trend)
+        st.line_chart(hist_df.groupby("Date")["Value"].sum())
     else:
         st.info("No history yet. Save snapshots over days to see trends.")
 
@@ -287,8 +314,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-# ===================================================
-# ================= FOOTER ==========================
-# ===================================================
-
-st.caption("v11.0 • multi-snapshot monitoring • income & value trends • automatic warnings")
+st.caption("v11.1 • persistent inputs + multi-snapshot monitoring + automatic warnings")
