@@ -7,6 +7,11 @@ import yfinance as yf
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
+# -------------------- CACHED DATA LOADER --------------------
+@st.cache_data(ttl=900)
+def load_prices(ticker, period="2mo"):
+    return yf.download(ticker, period=period, interval="1d", progress=False)
+
 # -------------------- DEFAULT DATA --------------------
 DEFAULT_ETFS = {
     "QDTE": {"shares": 125, "price": 30.82, "yield": 0.30, "type": "Income"},
@@ -55,7 +60,7 @@ if "payouts" not in st.session_state:
 # -------------------- ANALYSIS FUNCTIONS --------------------
 def price_trend_signal(ticker):
     try:
-        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        df = load_prices(ticker, "1mo")
         if len(df) >= 10:
             recent = df.tail(15)
             low = recent["Close"].min()
@@ -73,7 +78,7 @@ def price_trend_signal(ticker):
 
 def volatility_regime(ticker):
     try:
-        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        df = load_prices(ticker, "1mo")
         if len(df) >= 10:
             df["range"] = (df["High"] - df["Low"]) / df["Close"]
             recent = df["range"].tail(10).mean()
@@ -92,7 +97,7 @@ def volatility_regime(ticker):
 def payout_signal(ticker):
     pays = st.session_state.payouts.get(ticker, [])
     if len(pays) < 4:
-        return "UNKNOWN"
+        return "STABLE"
     recent_avg = sum(pays[-2:]) / 2
     older_avg = sum(pays[:2]) / 2
     if recent_avg > older_avg * 1.05:
@@ -103,10 +108,33 @@ def payout_signal(ticker):
         return "STABLE"
 
 
-# -------------------- NEW: VIX VOLATILITY ALERT --------------------
+# -------------------- FIXED MOMENTUM SIGNAL --------------------
+def momentum_signal(ticker):
+    try:
+        df = load_prices(ticker, "2mo")
+        if len(df) >= 25:
+            df["MA5"] = df["Close"].rolling(5).mean()
+            df["MA20"] = df["Close"].rolling(20).mean()
+            last = df.iloc[-1]
+            if last["MA5"] < last["MA20"]:
+                return "WEAK"
+            else:
+                return "STRONG"
+        elif len(df) >= 10:
+            slope = df["Close"].iloc[-1] - df["Close"].iloc[-10]
+            if slope < 0:
+                return "WEAK"
+            else:
+                return "NEUTRAL"
+    except:
+        pass
+    return "NEUTRAL"
+
+
+# -------------------- VIX ALERT --------------------
 def vix_alert():
     try:
-        df = yf.download("^VIX", period="5d", interval="1d", progress=False)
+        df = load_prices("^VIX", "5d")
         if len(df) > 0:
             vix = df["Close"].iloc[-1]
             if vix > 30:
@@ -120,27 +148,10 @@ def vix_alert():
     return "UNKNOWN", None
 
 
-# -------------------- NEW: MOMENTUM ROLLOVER --------------------
-def momentum_signal(ticker):
-    try:
-        df = yf.download(ticker, period="2mo", interval="1d", progress=False)
-        if len(df) >= 25:
-            df["MA5"] = df["Close"].rolling(5).mean()
-            df["MA20"] = df["Close"].rolling(20).mean()
-            last = df.iloc[-1]
-            if last["MA5"] < last["MA20"]:
-                return "WEAK"
-            else:
-                return "STRONG"
-    except:
-        pass
-    return "UNKNOWN"
-
-
 # -------------------- MARKET REGIME --------------------
 def market_regime_signal():
     try:
-        df = yf.download("SPY", period="1y", interval="1d", progress=False)
+        df = load_prices("SPY", "1y")
         if len(df) >= 200:
             df["MA50"] = df["Close"].rolling(50).mean()
             df["MA200"] = df["Close"].rolling(200).mean()
@@ -186,14 +197,12 @@ def final_signal(ticker, price_sig, pay_sig, underlying_trend, momentum_sig):
     else:
         base = "🟠 PAUSE"
 
-    # VIX override
     if vix_state in ["HIGH", "PANIC"]:
         if "BUY" in base or "ADD" in base:
             return "🟡 HOLD (High Vol)"
         if "PAUSE" in base:
             return "🔴 REDUCE 33% (High Vol)"
 
-    # Bear market override
     if market_regime == "BEAR":
         if "BUY" in base or "ADD" in base:
             return "🟡 HOLD (Market Bear)"
@@ -212,7 +221,7 @@ for t in st.session_state.etfs:
     d = payout_signal(t)
     u = UNDERLYING_MAP.get(t)
     u_trend = underlying_trends.get(u, "NEUTRAL")
-    mom = underlying_momentum.get(u, "UNKNOWN")
+    mom = underlying_momentum.get(u, "NEUTRAL")
     f = final_signal(t, p, d, u_trend, mom)
     price_signals[t] = p
     signals[t] = f
@@ -467,4 +476,4 @@ with st.expander("📈 Save Portfolio Snapshot"):
         st.success("Snapshot saved.")
 
 # -------------------- FOOTER --------------------
-st.caption("v8.9 — early volatility + momentum breakdown protection added.")
+st.caption("v8.9.1 — momentum fallback + cached data reliability fix.")
