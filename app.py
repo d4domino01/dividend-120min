@@ -60,7 +60,7 @@ load_from_browser()
 # ================= SESSION =================
 
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {t: {"shares": DEFAULT_SHARES[t], "weekly_div": ""} for t in ETF_LIST}
+    st.session_state.holdings = {t: {"shares": DEFAULT_SHARES[t], "weekly_div_ps": ""} for t in ETF_LIST}
 
 if "cash" not in st.session_state:
     st.session_state.cash = ""
@@ -82,12 +82,12 @@ def get_price(ticker):
         return None
 
 @st.cache_data(ttl=600)
-def get_auto_div(ticker):
+def get_auto_div_ps(ticker):
     try:
         divs = yf.Ticker(ticker).dividends
         if len(divs) == 0:
             return 0.0
-        return float(divs.iloc[-1])
+        return float(divs.iloc[-1])  # per share
     except:
         return 0.0
 
@@ -116,39 +116,54 @@ drawdown_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
-    auto_div = get_auto_div(t)
+    auto_ps = get_auto_div_ps(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
     drawdown_map[t] = drawdown
 
     shares = st.session_state.holdings[t]["shares"]
-    manual = safe_float(st.session_state.holdings[t]["weekly_div"])
-    weekly = manual if manual > 0 else auto_div * shares
+    manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
+
+    div_ps = manual_ps if manual_ps > 0 else auto_ps
+    weekly_income = div_ps * shares
 
     value = (price or 0) * shares
-    annual = weekly * 52
+    annual = weekly_income * 52
     monthly = annual / 12
 
     rows.append({
-        "Ticker": t, "Shares": shares, "Price": price,
-        "Weekly Income": round(weekly,2), "Monthly Income": round(monthly,2),
-        "Value": round(value,2), "Trend": trend, "Drawdown %": drawdown
+        "Ticker": t,
+        "Shares": shares,
+        "Price": price,
+        "Div / Share": round(div_ps, 4),
+        "Weekly Income": round(weekly_income, 2),
+        "Monthly Income": round(monthly, 2),
+        "Value": round(value, 2),
+        "Trend": trend,
+        "Drawdown %": drawdown
     })
 
 df = pd.DataFrame(rows)
 
+total_value = df["Value"].sum() + safe_float(st.session_state.cash)
+total_annual_income = df["Weekly Income"].sum() * 52
+total_monthly_income = total_annual_income / 12
+
 # ================= MARKET CONDITION =================
 
-down = (df["Trend"]=="Down").sum()
-market = "🟢 BUY" if down==0 else "🟡 HOLD" if down==1 else "🔴 DEFENSIVE"
+down = (df["Trend"] == "Down").sum()
+market = "🟢 BUY" if down == 0 else "🟡 HOLD" if down == 1 else "🔴 DEFENSIVE"
 
-st.markdown(f"<div style='padding:8px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>", unsafe_allow_html=True)
+st.markdown(
+    f"<div style='padding:8px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>",
+    unsafe_allow_html=True
+)
 
 # ====================================================
 # ===== ETF VALUE IMPACT vs INCOME ===================
 # ====================================================
 
-st.markdown("### 💥 ETF Value Impact vs Income")
+st.markdown("### 💥 ETF Value Impact vs Income (per ETF)")
 
 impact = []
 reduce_count = 0
@@ -157,23 +172,34 @@ for t in ETF_LIST:
     hist = get_hist(t)
     shares = st.session_state.holdings[t]["shares"]
 
-    if hist is not None and len(hist)>25:
+    if hist is not None and len(hist) > 25:
         now = hist["Close"].iloc[-1]
         d14 = hist["Close"].iloc[-10]
         d28 = hist["Close"].iloc[-20]
-        chg14 = (now-d14)*shares
-        chg28 = (now-d28)*shares
+        chg14 = (now - d14) * shares
+        chg28 = (now - d28) * shares
     else:
         chg14 = chg28 = 0
 
-    weekly = df[df.Ticker==t]["Weekly Income"].iloc[0]
+    weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
 
-    if chg14>=0 and chg28>=0: sig="🟢 HOLD"
-    elif weekly>=abs(chg28) or weekly>=abs(chg14): sig="🟡 WATCH"
+    if chg14 >= 0 and chg28 >= 0:
+        sig = "🟢 HOLD"
+    elif weekly >= abs(chg28):
+        sig = "🟡 WATCH"
+    elif weekly >= abs(chg14):
+        sig = "🟡 WATCH"
     else:
-        sig="🔴 REDUCE"; reduce_count+=1
+        sig = "🔴 REDUCE"
+        reduce_count += 1
 
-    impact.append({"ETF":t,"Weekly $":round(weekly,2),"14d $":round(chg14,2),"28d $":round(chg28,2),"Signal":sig})
+    impact.append({
+        "ETF": t,
+        "Weekly Income ($)": round(weekly, 2),
+        "Value Change 14d ($)": round(chg14, 2),
+        "Value Change 28d ($)": round(chg28, 2),
+        "Signal": sig
+    })
 
 st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
@@ -183,23 +209,49 @@ st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
 with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
-        c1,c2=st.columns(2)
+        c1, c2 = st.columns(2)
+
         with c1:
-            st.session_state.holdings[t]["shares"]=st.number_input("Shares",0,step=1,value=st.session_state.holdings[t]["shares"],key=f"s{t}")
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares", min_value=0, step=1,
+                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
+            )
+
         with c2:
-            st.session_state.holdings[t]["weekly_div"]=st.text_input("Weekly Div ($)",value=str(st.session_state.holdings[t]["weekly_div"]),key=f"d{t}")
-        r=df[df.Ticker==t].iloc[0]
-        st.caption(f"Value ${r.Value} | Monthly ${r['Monthly Income']}")
+            st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
+                "Weekly Dividend per Share ($) — use , or .",
+                value=str(st.session_state.holdings[t]["weekly_div_ps"]), key=f"dps_{t}"
+            )
+
+        r = df[df.Ticker == t].iloc[0]
+        st.caption(
+            f"Price: ${r.Price} | Div/Share: {r['Div / Share']} | Drawdown: {r['Drawdown %']}%"
+        )
+        st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
+    with c2:
+        st.metric("💸 Annual Income", f"${total_annual_income:,.2f}")
+    with c3:
+        st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
+
+    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
+
+save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ====================================================
 # ================= WARNINGS =========================
 # ====================================================
 
 with st.expander("🚨 Warnings & Risk"):
-    for _,r in df.iterrows():
-        if r["Trend"]=="Down": st.warning(f"{r.Ticker} in downtrend")
-        if r["Drawdown %"]>8: st.error(f"{r.Ticker} drawdown {r['Drawdown %']}%")
+    for _, r in df.iterrows():
+        if r["Trend"] == "Down":
+            st.warning(f"{r.Ticker} in downtrend")
+        if r["Drawdown %"] > 8:
+            st.error(f"{r.Ticker} drawdown {r['Drawdown %']}%")
 
 # ====================================================
 # ================= MARKET STRESS ====================
@@ -207,9 +259,9 @@ with st.expander("🚨 Warnings & Risk"):
 
 with st.expander("📉 Market Stress & Early Warnings"):
     for t in ETF_LIST:
-        hist = get_hist(t,10)
-        if hist is not None and len(hist)>1:
-            move = (hist["Close"].iloc[-1]-hist["Close"].iloc[-2])/hist["Close"].iloc[-2]*100
+        hist = get_hist(t, 10)
+        if hist is not None and len(hist) > 1:
+            move = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
             st.write(f"{t}: {move:.2f}% daily move")
 
 # ====================================================
@@ -218,7 +270,7 @@ with st.expander("📉 Market Stress & Early Warnings"):
 
 with st.expander("🎯 Allocation Optimizer (Phase 6)"):
     ranked = df.sort_values("Trend", ascending=False)
-    for _,r in ranked.iterrows():
+    for _, r in ranked.iterrows():
         st.write(f"{r.Ticker} | Trend: {r.Trend}")
 
 # ====================================================
@@ -226,9 +278,9 @@ with st.expander("🎯 Allocation Optimizer (Phase 6)"):
 # ====================================================
 
 with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
-    strongest = df[df.Trend=="Up"]
-    weakest = df[df.Trend=="Down"]
-    if len(strongest)>0 and len(weakest)>0:
+    strongest = df[df.Trend == "Up"]
+    weakest = df[df.Trend == "Down"]
+    if len(strongest) > 0 and len(weakest) > 0:
         st.warning(f"Consider trimming {weakest.iloc[0].Ticker} and adding to {strongest.iloc[0].Ticker}")
     else:
         st.success("No rebalance needed")
@@ -238,7 +290,7 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
 # ====================================================
 
 with st.expander("🔮 Income Outlook (Phase 8)"):
-    for _,r in df.iterrows():
+    for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
 # ====================================================
@@ -247,10 +299,10 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
 
 with st.expander("📤 Export & History"):
     if st.button("Save Snapshot"):
-        df.to_csv(os.path.join(SNAP_DIR,f"{datetime.now().strftime('%Y%m%d_%H%M')}.csv"),index=False)
+        df.to_csv(os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M')}.csv"), index=False)
         st.success("Saved")
 
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV",csv,"portfolio.csv","text/csv")
+    st.download_button("Download CSV", csv, "portfolio.csv", "text/csv")
 
-st.caption("v20.3 • ALL DROPDOWNS RESTORED • ETF VALUE IMPACT ACTIVE")
+st.caption("v20.4 • Per-share dividend model • ETF value impact vs income")
