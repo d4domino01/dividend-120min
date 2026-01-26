@@ -28,6 +28,13 @@ st.markdown(
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
+# underlying proxies for news context
+UNDERLYING_MAP = {
+    "QDTE": "QQQ",
+    "XDTE": "SPY",
+    "CHPY": "SOXX"
+}
+
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
@@ -106,6 +113,13 @@ def get_drawdown(ticker):
         return round((high - last) / high * 100, 2)
     except:
         return 0
+
+@st.cache_data(ttl=600)
+def get_news(ticker):
+    try:
+        return yf.Ticker(ticker).news[:5]
+    except:
+        return []
 
 # ================= BUILD MAIN TABLE =================
 
@@ -191,6 +205,20 @@ for t in ETF_LIST:
 
 st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
+# ================= NEWS =================
+
+with st.expander("📰 ETF & Underlying News (Latest)"):
+    for t in ETF_LIST:
+        st.markdown(f"### 📌 {t} News")
+        for n in get_news(t):
+            st.write("•", n.get("title", ""))
+        u = UNDERLYING_MAP.get(t)
+        if u:
+            st.markdown(f"**Underlying ({u})**")
+            for n in get_news(u):
+                st.write("–", n.get("title", ""))
+        st.divider()
+
 # ================= PORTFOLIO =================
 
 with st.expander("📁 Portfolio", expanded=True):
@@ -230,7 +258,7 @@ with st.expander("📁 Portfolio", expanded=True):
 
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
-# ================= SNAPSHOTS & ANALYSIS =================
+# ================= SNAPSHOTS =================
 
 with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
@@ -315,4 +343,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v20.7 • Snapshot history + comparison restored • Charts restored • Cash wallet fixed")
+st.caption("v20.8 • News section restored • No features removed")
