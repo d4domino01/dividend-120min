@@ -5,6 +5,7 @@ from datetime import datetime
 import os, glob, json
 import streamlit.components.v1 as components
 import numpy as np
+import altair as alt
 
 # ================= PAGE =================
 st.markdown(
@@ -71,6 +72,16 @@ def get_auto_div(ticker):
         return 0.0
 
 @st.cache_data(ttl=900)
+def get_recent_avg_div(ticker):
+    try:
+        divs = yf.Ticker(ticker).dividends.tail(4)
+        if len(divs) == 0:
+            return 0.0
+        return round(divs.mean(), 4)
+    except:
+        return 0.0
+
+@st.cache_data(ttl=900)
 def get_trend(ticker):
     try:
         df = yf.Ticker(ticker).history(period="1mo")
@@ -111,16 +122,19 @@ def get_vol_regime(ticker):
 rows = []
 drawdown_map = {}
 vol_regime_map = {}
+avg_div_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
     auto_div = get_auto_div(t)
+    avg_div = get_recent_avg_div(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
     regime, ratio = get_vol_regime(t)
 
     drawdown_map[t] = drawdown
     vol_regime_map[t] = regime
+    avg_div_map[t] = avg_div
 
     shares = st.session_state.holdings[t]["shares"]
     weekly_div = st.session_state.holdings[t]["weekly_div"]
@@ -189,7 +203,7 @@ with st.expander("📁 Portfolio", expanded=True):
 
         r = df[df.Ticker == t].iloc[0]
         st.caption(
-            f"Price: ${r.Price} | Drawdown: {r['Drawdown %']}% | Premium: {r['Premium Regime']}"
+            f"Price: ${r.Price} | Auto div: {r['Auto Div']} | Drawdown: {r['Drawdown %']}% | Premium: {r['Premium Regime']}"
         )
         st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
@@ -209,35 +223,21 @@ with st.expander("📁 Portfolio", expanded=True):
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ===================================================
-# ========== PHASE 8 — SHORT-TERM INCOME OUTLOOK =====
+# ========== PHASE 8 — ETF INCOME OUTLOOK ============
 # ===================================================
 
-with st.expander("🔮 Income Outlook — Next 4 Weeks (Phase 8)"):
+with st.expander("🔮 Income Outlook (Phase 8 — Next 4 Weeks)"):
 
-    for etf in ETF_LIST:
-        r = df[df.Ticker == etf].iloc[0]
-        weekly_income = r["Weekly Div"] * r["Shares"]
+    for t in ETF_LIST:
+        shares = st.session_state.holdings[t]["shares"]
 
-        adj = 1.0
+        est_weekly = avg_div_map[t] if avg_div_map[t] > 0 else st.session_state.holdings[t]["weekly_div"]
+        est_4wk = est_weekly * shares * 4
 
-        if r["Trend"] == "Down":
-            adj -= 0.1
-        if r["Drawdown %"] >= 8:
-            adj -= 0.15
-        if r["Premium Regime"] == "Low Premium":
-            adj -= 0.1
-        if r["Premium Regime"] == "High Premium":
-            adj += 0.05
-
-        forecast_weekly = max(0, weekly_income * adj)
-        forecast_4w = forecast_weekly * 4
-
-        if adj >= 1.0:
-            st.success(f"{etf}: 🟢 Stable/Improving — est. next 4w income ${forecast_4w:,.2f}")
-        elif adj >= 0.8:
-            st.warning(f"{etf}: 🟡 Slight softening — est. next 4w income ${forecast_4w:,.2f}")
-        else:
-            st.error(f"{etf}: 🔴 Weak income outlook — est. next 4w income ${forecast_4w:,.2f}")
+        st.markdown(f"### {t}")
+        st.write(f"Estimated weekly distribution: **${est_weekly:.4f}**")
+        st.write(f"Expected income next 4 weeks: **${est_4wk:,.2f}**")
+        st.divider()
 
 # ===================================================
 # ================= EXPORT & HISTORY =================
@@ -265,22 +265,22 @@ with st.expander("📤 Export & History"):
             hist.append(d)
         hist_df = pd.concat(hist)
 
-        # 👇 POPUP FIX — charts inside expander
-        with st.expander("📊 View History Charts"):
-            st.subheader("📈 Monthly Income Trend")
-            st.line_chart(hist_df.groupby("Date")["Monthly Income"].sum())
+        with st.expander("📈 History Charts"):
+            v1 = alt.Chart(hist_df.groupby("Date")["Monthly Income"].sum().reset_index()).mark_line().encode(
+                x="Date", y="Monthly Income"
+            )
+            st.altair_chart(v1, use_container_width=True)
 
-            st.subheader("📈 Portfolio Value Trend")
-            st.line_chart(hist_df.groupby("Date")["Value"].sum())
+            v2 = alt.Chart(hist_df.groupby("Date")["Value"].sum().reset_index()).mark_line().encode(
+                x="Date", y="Value"
+            )
+            st.altair_chart(v2, use_container_width=True)
     else:
         st.info("No history yet. Save snapshots to start tracking trends.")
 
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "⬇️ Download Portfolio CSV",
-        data=csv,
-        file_name=f"portfolio_{datetime.now().date()}.csv",
-        mime="text/csv"
-    )
+    st.download_button("⬇️ Download Portfolio CSV", data=csv,
+                       file_name=f"portfolio_{datetime.now().date()}.csv",
+                       mime="text/csv")
 
-st.caption("v18.0 • Phase-8 income outlook • mobile popup fixed via chart container")
+st.caption("v18.0 • Phase-8 ETF income outlook added • popup fixed • no other logic changed")
