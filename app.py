@@ -35,7 +35,7 @@ UNDERLYING_MAP = {
     "CHPY": "SOXX"
 }
 
-# ✅ WORKING Google News topic feeds (via feedparser)
+# ✅ Working Google News topic feeds
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
     "CHPY": "https://news.google.com/rss/search?q=semiconductor+industry+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -213,7 +213,7 @@ for t in ETF_LIST:
 
 st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
-# ================= NEWS (RESTORED WORKING FEEDS) =================
+# ================= NEWS (CLICKABLE) =================
 
 with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
     for t in ETF_LIST:
@@ -223,7 +223,12 @@ with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
 
         if entries:
             for n in entries:
-                st.write("•", n.get("title", ""))
+                title = n.get("title", "Open article")
+                link = n.get("link", "")
+                if link:
+                    st.markdown(f"• [{title}]({link})")
+                else:
+                    st.write("•", title)
         else:
             st.info("No news feed available right now.")
 
@@ -353,4 +358,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v21.1 • Feedparser market news restored • No features removed")
+st.caption("v21.2 • Clickable news links added • No features removed")
