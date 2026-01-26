@@ -72,16 +72,6 @@ def get_auto_div(ticker):
         return 0.0
 
 @st.cache_data(ttl=900)
-def get_recent_avg_div(ticker):
-    try:
-        divs = yf.Ticker(ticker).dividends.tail(4)
-        if len(divs) == 0:
-            return 0.0
-        return round(divs.mean(), 4)
-    except:
-        return 0.0
-
-@st.cache_data(ttl=900)
 def get_trend(ticker):
     try:
         df = yf.Ticker(ticker).history(period="1mo")
@@ -122,19 +112,16 @@ def get_vol_regime(ticker):
 rows = []
 drawdown_map = {}
 vol_regime_map = {}
-avg_div_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
     auto_div = get_auto_div(t)
-    avg_div = get_recent_avg_div(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
     regime, ratio = get_vol_regime(t)
 
     drawdown_map[t] = drawdown
     vol_regime_map[t] = regime
-    avg_div_map[t] = avg_div
 
     shares = st.session_state.holdings[t]["shares"]
     weekly_div = st.session_state.holdings[t]["weekly_div"]
@@ -223,20 +210,179 @@ with st.expander("📁 Portfolio", expanded=True):
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ===================================================
-# ========== PHASE 8 — ETF INCOME OUTLOOK ============
+# ================= WARNINGS & RISK =================
+# ===================================================
+
+with st.expander("🚨 Warnings & Risk"):
+
+    warnings_found = False
+
+    for _, r in df.iterrows():
+        if r["Trend"] == "Down":
+            st.warning(f"{r['Ticker']}: Downtrend detected.")
+            warnings_found = True
+        if r["Drawdown %"] >= 10:
+            st.error(f"{r['Ticker']}: Price drawdown {r['Drawdown %']}% from recent high.")
+            warnings_found = True
+        elif r["Drawdown %"] >= 6:
+            st.warning(f"{r['Ticker']}: Price down {r['Drawdown %']}% from recent high.")
+            warnings_found = True
+        if r["Premium Regime"] == "Low Premium":
+            st.warning(f"{r['Ticker']}: Option premium regime weakening.")
+
+    if not warnings_found:
+        st.success("✅ No immediate capital risks detected.")
+
+# ===================================================
+# ========== MARKET STRESS — PHASE 1 =================
+# ===================================================
+
+with st.expander("📉 Market Stress & Early Warnings"):
+
+    STRESS_MAP = {
+        "QDTE": ["QQQ", "AAPL", "MSFT"],
+        "CHPY": ["SOXX", "NVDA", "AMD"],
+        "XDTE": ["SPY", "VIX"]
+    }
+
+    @st.cache_data(ttl=600)
+    def get_stress_metrics(ticker):
+        try:
+            df = yf.Ticker(ticker).history(period="15d")
+            if len(df) < 10:
+                return None
+            prev = df["Close"].iloc[-2]
+            last = df["Close"].iloc[-1]
+            daily_pct = (last - prev) / prev * 100
+            returns = df["Close"].pct_change().dropna()
+            vol = returns[-10:].std() * 100
+            if "Volume" in df:
+                avg_vol = df["Volume"][-11:-1].mean()
+                today_vol = df["Volume"].iloc[-1]
+                vol_spike = today_vol / avg_vol if avg_vol > 0 else 1
+            else:
+                vol_spike = 1
+            return round(daily_pct,2), round(vol,2), round(vol_spike,2)
+        except:
+            return None
+
+    stress_scores = {}
+
+    for etf in ETF_LIST:
+        st.markdown(f"### {etf}")
+        proxies = STRESS_MAP.get(etf, [])
+        stress_score = 0
+
+        for p in proxies:
+            data = get_stress_metrics(p)
+            if data is None:
+                st.caption(f"{p}: data unavailable")
+                continue
+            daily, vol, vol_spike = data
+            msg = f"{p}: {daily}% | vol {vol}% | vol x{vol_spike}"
+            if daily <= -2 and vol_spike >= 1.5:
+                st.error("🚨 " + msg)
+                stress_score += 35
+            elif daily <= -1:
+                st.warning("⚠️ " + msg)
+                stress_score += 20
+            elif daily >= 2:
+                st.success("📈 " + msg)
+            else:
+                st.caption(msg)
+
+        stress_scores[etf] = stress_score
+        st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
+        st.divider()
+
+# ===================================================
+# ========== PHASE 6 — ALLOCATION OPTIMIZER ==========
+# ===================================================
+
+with st.expander("🎯 Allocation Optimizer (Phase 6)"):
+
+    scores = {}
+
+    for etf in ETF_LIST:
+        score = 0
+        if df[df.Ticker == etf]["Trend"].iloc[0] == "Up":
+            score += 30
+        if drawdown_map[etf] < 6:
+            score += 25
+        if stress_scores.get(etf, 0) < 30:
+            score += 25
+        if vol_regime_map[etf] in ["Normal", "High Premium"]:
+            score += 20
+        scores[etf] = score
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    for etf, sc in ranked:
+        st.write(f"**{etf}** → Score: {sc}/100")
+
+    if st.session_state.cash > 0:
+        best_etf = ranked[0][0]
+        price = df[df.Ticker == best_etf]["Price"].iloc[0]
+        if price:
+            shares = int(st.session_state.cash // price)
+            if shares > 0:
+                st.success(f"💡 Best use of cash → Buy **{shares} shares of {best_etf}**")
+
+# ===================================================
+# ========== PHASE 7 — REBALANCE ENGINE ==============
+# ===================================================
+
+with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
+
+    strongest = max(scores, key=scores.get)
+    weakest = min(scores, key=scores.get)
+
+    if strongest != weakest and scores[strongest] - scores[weakest] >= 25:
+        weak_price = df[df.Ticker == weakest]["Price"].iloc[0]
+        strong_price = df[df.Ticker == strongest]["Price"].iloc[0]
+        weak_shares = st.session_state.holdings[weakest]["shares"]
+
+        if weak_price and strong_price and weak_shares > 0:
+            trim_shares = max(1, int(weak_shares * 0.25))
+            cash_from_trim = trim_shares * weak_price
+            buy_shares = int(cash_from_trim // strong_price)
+
+            if buy_shares > 0:
+                st.warning(
+                    f"🔁 Consider trimming **{trim_shares} shares of {weakest}** "
+                    f"and adding **{buy_shares} shares of {strongest}** "
+                    f"to rotate into stronger conditions."
+                )
+            else:
+                st.info("Rebalance detected but cash would not buy full shares.")
+        else:
+            st.info("Rebalance not practical due to small position size.")
+    else:
+        st.success("✅ Portfolio balance acceptable — no rebalance suggested.")
+
+# ===================================================
+# ========== PHASE 8 — ETF INCOME OUTLOOK =============
 # ===================================================
 
 with st.expander("🔮 Income Outlook (Phase 8 — Next 4 Weeks)"):
 
-    for t in ETF_LIST:
-        shares = st.session_state.holdings[t]["shares"]
+    for etf in ETF_LIST:
+        shares = st.session_state.holdings[etf]["shares"]
 
-        est_weekly = avg_div_map[t] if avg_div_map[t] > 0 else st.session_state.holdings[t]["weekly_div"]
-        est_4wk = est_weekly * shares * 4
+        try:
+            divs = yf.Ticker(etf).dividends.tail(4)
+            if len(divs) > 0:
+                est_weekly = divs.mean()
+            else:
+                est_weekly = st.session_state.holdings[etf]["weekly_div"]
+        except:
+            est_weekly = st.session_state.holdings[etf]["weekly_div"]
 
-        st.markdown(f"### {t}")
+        est_4w = est_weekly * shares * 4
+
+        st.markdown(f"### {etf}")
         st.write(f"Estimated weekly distribution: **${est_weekly:.4f}**")
-        st.write(f"Expected income next 4 weeks: **${est_4wk:,.2f}**")
+        st.write(f"Projected next 4 weeks income: **${est_4w:,.2f}**")
         st.divider()
 
 # ===================================================
@@ -265,22 +411,29 @@ with st.expander("📤 Export & History"):
             hist.append(d)
         hist_df = pd.concat(hist)
 
-        with st.expander("📈 History Charts"):
-            v1 = alt.Chart(hist_df.groupby("Date")["Monthly Income"].sum().reset_index()).mark_line().encode(
-                x="Date", y="Monthly Income"
+        with st.expander("📊 View History Charts"):
+            st.subheader("📈 Monthly Income Trend")
+            inc = hist_df.groupby("Date")["Monthly Income"].sum().reset_index()
+            chart1 = alt.Chart(inc).mark_line().encode(
+                x="Date", y="Monthly Income", tooltip=[]
             )
-            st.altair_chart(v1, use_container_width=True)
+            st.altair_chart(chart1, use_container_width=True)
 
-            v2 = alt.Chart(hist_df.groupby("Date")["Value"].sum().reset_index()).mark_line().encode(
-                x="Date", y="Value"
+            st.subheader("📈 Portfolio Value Trend")
+            val = hist_df.groupby("Date")["Value"].sum().reset_index()
+            chart2 = alt.Chart(val).mark_line().encode(
+                x="Date", y="Value", tooltip=[]
             )
-            st.altair_chart(v2, use_container_width=True)
+            st.altair_chart(chart2, use_container_width=True)
     else:
         st.info("No history yet. Save snapshots to start tracking trends.")
 
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Download Portfolio CSV", data=csv,
-                       file_name=f"portfolio_{datetime.now().date()}.csv",
-                       mime="text/csv")
+    st.download_button(
+        "⬇️ Download Portfolio CSV",
+        data=csv,
+        file_name=f"portfolio_{datetime.now().date()}.csv",
+        mime="text/csv"
+    )
 
-st.caption("v18.0 • Phase-8 ETF income outlook added • popup fixed • no other logic changed")
+st.caption("v18.0 • popup fixed • Phase-8 ETF income outlook added • no existing logic removed")
