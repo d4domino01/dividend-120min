@@ -26,14 +26,13 @@ st.markdown(
 )
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
-
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
 # =========================================================
-# ============== CLIENT-SIDE STORAGE (PHONE) ==============
+# ============== CLIENT-SIDE STORAGE ======================
 # =========================================================
 
 def load_from_browser():
@@ -67,7 +66,7 @@ if "holdings" not in st.session_state:
     }
 
 if "cash" not in st.session_state:
-    st.session_state.cash = "0"
+    st.session_state.cash = ""
 
 # ================= DATA =================
 
@@ -183,7 +182,6 @@ total_monthly_income = total_annual_income / 12
 # ================= MARKET CONDITION =================
 
 down = (df["Trend"] == "Down").sum()
-
 if down >= 2:
     market = "🔴 SELL / DEFENSIVE"
 elif down == 1:
@@ -197,7 +195,7 @@ st.markdown(
 )
 
 # ====================================================
-# ===== ETF VALUE IMPACT ENGINE ======================
+# ===== ETF VALUE IMPACT vs INCOME ===================
 # ====================================================
 
 st.markdown("### 💥 ETF Value Impact vs Income (Per ETF)")
@@ -215,7 +213,6 @@ for t in ETF_LIST:
         price_14 = hist["Close"].iloc[-10]
         price_28 = hist["Close"].iloc[-20]
         shares = st.session_state.holdings[t]["shares"]
-
         chg14 = (price_now - price_14) * shares
         chg28 = (price_now - price_28) * shares
 
@@ -247,42 +244,9 @@ for t in ETF_LIST:
 df_impact = pd.DataFrame(impact_rows)
 st.dataframe(df_impact, use_container_width=True)
 
-if reduce_count > 0:
-    st.error(f"🚨 {reduce_count} ETF(s) where income is not covering price losses.")
-else:
-    st.success("✅ Income is currently offsetting price movement.")
-
 # ====================================================
-# ========== STRATEGY MODE ENGINE =====================
+# ================= PORTFOLIO ========================
 # ====================================================
-
-def determine_strategy_mode(df, reduce_count, drawdown_map):
-    down = (df["Trend"] == "Down").sum()
-    max_dd = max(drawdown_map.values()) if drawdown_map else 0
-
-    if reduce_count >= 1 or down >= 2 or max_dd >= 10:
-        return "PROTECT", "Income not covering losses • Reduce exposure"
-
-    if down == 1 or max_dd >= 6:
-        return "OBSERVE", "Monitor closely • Avoid overtrading"
-
-    return "ACCUMULATE", "Reinvest income into strongest ETF"
-
-strategy_mode, strategy_hint = determine_strategy_mode(df, reduce_count, drawdown_map)
-
-MODE_COLOR = {"ACCUMULATE":"🟢","OBSERVE":"🟡","PROTECT":"🔴"}
-
-st.markdown(
-    f"""
-    <div style='padding:12px;border-radius:10px;background:#141414;margin-top:8px'>
-    <b>🧭 Strategy Mode:</b> {MODE_COLOR[strategy_mode]} <b>{strategy_mode}</b><br>
-    <span style='opacity:0.75;font-size:13px'>{strategy_hint}</span>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ================= PORTFOLIO =====================
 
 with st.expander("📁 Portfolio", expanded=True):
 
@@ -318,14 +282,13 @@ with st.expander("📁 Portfolio", expanded=True):
     with c3:
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
-    st.session_state.cash = st.text_input(
-        "💰 Cash Wallet ($)",
-        value=str(st.session_state.cash)
-    )
+    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
 
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
+# ====================================================
 # ================= EXPORT & HISTORY =================
+# ====================================================
 
 with st.expander("📤 Export & History"):
 
@@ -339,28 +302,6 @@ with st.expander("📤 Export & History"):
         df.to_csv(os.path.join(SNAP_DIR, f"{ts}.csv"), index=False)
         st.success("Snapshot saved.")
 
-    snap_files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.csv")))
-
-    if snap_files:
-        hist = []
-        for f in snap_files:
-            d = pd.read_csv(f)
-            d["Date"] = os.path.basename(f).replace(".csv", "")
-            hist.append(d)
-        hist_df = pd.concat(hist)
-
-        with st.expander("📊 View History Charts"):
-            inc = hist_df.groupby("Date")["Monthly Income"].sum().reset_index()
-            st.altair_chart(alt.Chart(inc).mark_line().encode(x="Date", y="Monthly Income"),
-                            use_container_width=True)
-
-            val = hist_df.groupby("Date")["Value"].sum().reset_index()
-            st.altair_chart(alt.Chart(val).mark_line().encode(x="Date", y="Value"),
-                            use_container_width=True)
-
-    else:
-        st.info("No history yet. Save snapshots to track trends.")
-
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
         "⬇️ Download Portfolio CSV",
@@ -369,4 +310,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v20.0 • ETF Value Impact Engine • Income-adjusted capital protection")
+st.caption("v20.1 • UI preserved • ETF value impact vs income • EU decimal safe")
