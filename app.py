@@ -6,6 +6,7 @@ import os, json
 import streamlit.components.v1 as components
 import numpy as np
 import altair as alt
+import feedparser
 
 # ================= HELPERS =================
 
@@ -28,11 +29,17 @@ st.markdown(
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
-# underlying proxies for news context
 UNDERLYING_MAP = {
     "QDTE": "QQQ",
     "XDTE": "SPY",
     "CHPY": "SOXX"
+}
+
+# RSS fallback sources
+RSS_MAP = {
+    "QDTE": "https://www.nasdaq.com/feed/rssoutbound?category=Technology",
+    "CHPY": "https://www.nasdaq.com/feed/rssoutbound?category=Semiconductors",
+    "XDTE": "https://www.nasdaq.com/feed/rssoutbound?category=Markets"
 }
 
 SNAP_DIR = "snapshots"
@@ -114,10 +121,18 @@ def get_drawdown(ticker):
     except:
         return 0
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=900)
 def get_news(ticker):
     try:
         return yf.Ticker(ticker).news[:5]
+    except:
+        return []
+
+@st.cache_data(ttl=900)
+def get_rss(url):
+    try:
+        feed = feedparser.parse(url)
+        return feed.entries[:5]
     except:
         return []
 
@@ -210,13 +225,25 @@ st.dataframe(pd.DataFrame(impact), use_container_width=True)
 with st.expander("📰 ETF & Underlying News (Latest)"):
     for t in ETF_LIST:
         st.markdown(f"### 📌 {t} News")
+
+        shown = False
+
         for n in get_news(t):
             st.write("•", n.get("title", ""))
+            shown = True
+
         u = UNDERLYING_MAP.get(t)
         if u:
             st.markdown(f"**Underlying ({u})**")
             for n in get_news(u):
                 st.write("–", n.get("title", ""))
+                shown = True
+
+        if not shown:
+            st.markdown("**Sector / Market News**")
+            for n in get_rss(RSS_MAP.get(t, "")):
+                st.write("»", n.get("title", ""))
+
         st.divider()
 
 # ================= PORTFOLIO =================
@@ -343,4 +370,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v20.8 • News section restored • No features removed")
+st.caption("v20.9 • Sector/index fallback news added • No features removed")
