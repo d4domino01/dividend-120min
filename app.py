@@ -175,7 +175,7 @@ st.markdown(
 
 # ================= VALUE IMPACT =================
 
-st.markdown("### 💥 ETF Value Impact vs Income (per ETF)")
+st.markdown("#### 💥 ETF Value Impact vs Income (per ETF)")
 
 impact = []
 
@@ -217,7 +217,7 @@ st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
 with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
     for t in ETF_LIST:
-        st.markdown(f"### 📌 {t} — Market News")
+        st.markdown(f"#### 📌 {t} — Market News")
 
         entries = get_rss(RSS_MAP.get(t, ""))
 
@@ -238,7 +238,7 @@ with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
 
 with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
-        st.markdown(f"### 📈 {t}")
+        st.markdown(f"#### 📈 {t}")
 
         c1, c2 = st.columns(2)
         with c1:
@@ -296,7 +296,7 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
         comp["Change ($)"] = comp["Value_Now"] - comp["Value_Then"]
 
-        st.markdown("### 📊 ETF Value Comparison")
+        st.markdown("#### 📊 ETF Value Comparison")
         st.dataframe(comp, use_container_width=True)
 
         hist_vals = []
@@ -314,7 +314,7 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
             y="Total Value"
         )
 
-        st.markdown("### 📈 Portfolio Value Over Time")
+        st.markdown("#### 📈 Portfolio Value Over Time")
         st.altair_chart(chart, use_container_width=True)
 
 # ================= WARNINGS =================
