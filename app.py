@@ -347,7 +347,7 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
     else:
         st.success("Portfolio balance acceptable.")
 
-===================================================
+#===================================================
 
 ========== PHASE 8 — ETF INCOME OUTLOOK ============
 
