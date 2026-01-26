@@ -162,16 +162,15 @@ elif down == 1 or high_dd == 1:
 else:
     market = "🟢 BUY / ACCUMULATE"
 
-# ---- Strategy Mode Logic ----
 if market.startswith("🟢") and low_prem == 0:
     mode = "🟢 ACCUMULATE MODE"
     mode_text = "Add to strongest ETF • Reinvest income aggressively"
 elif market.startswith("🟡") or low_prem >= 1:
     mode = "🟡 OBSERVE MODE"
-    mode_text = "Pause new buying • Let income accumulate • Wait for clarity"
+    mode_text = "Pause new buying • Let cash build"
 else:
     mode = "🔴 PROTECT MODE"
-    mode_text = "Stop buying • Raise cash • Avoid new exposure"
+    mode_text = "Stop buying • Avoid new exposure"
 
 st.markdown(
     f"""
@@ -189,7 +188,6 @@ st.markdown(
 # ===================================================
 
 with st.expander("📁 Portfolio", expanded=True):
-
     for t in ETF_LIST:
         st.markdown(f"### {t}")
         c1, c2 = st.columns(2)
@@ -233,9 +231,7 @@ save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state
 # ===================================================
 
 with st.expander("🚨 Warnings & Risk"):
-
     warnings_found = False
-
     for _, r in df.iterrows():
         if r["Trend"] == "Down":
             st.warning(f"{r['Ticker']}: Downtrend detected.")
@@ -248,12 +244,125 @@ with st.expander("🚨 Warnings & Risk"):
             warnings_found = True
         if r["Premium Regime"] == "Low Premium":
             st.warning(f"{r['Ticker']}: Option premium regime weakening.")
-
     if not warnings_found:
         st.success("✅ No immediate capital risks detected.")
 
 # ===================================================
-# (Phases 1–9, 6–8, Export & History remain unchanged)
+# ========== MARKET STRESS — PHASE 1 + 9 ============
 # ===================================================
 
-st.caption("v19.1 • Phase-10 Strategy Mode added • all prior phases preserved")
+with st.expander("📉 Market Stress & Early Warnings"):
+    STRESS_MAP = {
+        "QDTE": ["QQQ", "AAPL", "MSFT"],
+        "CHPY": ["SOXX", "NVDA", "AMD"],
+        "XDTE": ["SPY", "VIX"]
+    }
+
+    UNDERLYING_MAP = {
+        "QDTE": ["QQQ"],
+        "CHPY": ["SOXX", "NVDA", "AMD"],
+        "XDTE": ["SPY"]
+    }
+
+    @st.cache_data(ttl=600)
+    def get_daily_move(ticker):
+        try:
+            df = yf.Ticker(ticker).history(period="5d")
+            if len(df) < 2:
+                return None
+            prev = df["Close"].iloc[-2]
+            last = df["Close"].iloc[-1]
+            return round((last - prev) / prev * 100, 2)
+        except:
+            return None
+
+    stress_scores = {}
+
+    for etf in ETF_LIST:
+        st.markdown(f"### {etf}")
+        stress_score = 0
+
+        for p in STRESS_MAP.get(etf, []):
+            move = get_daily_move(p)
+            if move is None:
+                continue
+            if move <= -2:
+                st.error(f"🚨 {p}: {move}%")
+                stress_score += 25
+            elif move <= -1:
+                st.warning(f"⚠️ {p}: {move}%")
+                stress_score += 15
+            else:
+                st.caption(f"{p}: {move}%")
+
+        bad = 0
+        for u in UNDERLYING_MAP.get(etf, []):
+            move = get_daily_move(u)
+            if move and move <= -1:
+                bad += 1
+
+        if bad >= 2:
+            stress_score += 25
+            st.warning("⚠️ Multiple underlying components weakening")
+        elif bad == 1:
+            stress_score += 10
+            st.caption("Underlying component showing weakness")
+
+        stress_scores[etf] = stress_score
+        st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
+        st.divider()
+
+# ===================================================
+# ========== PHASE 6 — ALLOCATION OPTIMIZER =========
+# ===================================================
+
+with st.expander("🎯 Allocation Optimizer (Phase 6)"):
+    scores = {}
+    for etf in ETF_LIST:
+        score = 0
+        if df[df.Ticker == etf]["Trend"].iloc[0] == "Up":
+            score += 30
+        if drawdown_map[etf] < 6:
+            score += 25
+        if stress_scores.get(etf, 0) < 30:
+            score += 25
+        if vol_regime_map[etf] in ["Normal", "High Premium"]:
+            score += 20
+        scores[etf] = score
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    for etf, sc in ranked:
+        st.write(f"{etf} → Score: {sc}/100")
+
+# ===================================================
+# ========== PHASE 7 — REBALANCE ENGINE =============
+# ===================================================
+
+with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
+    strongest = max(scores, key=scores.get)
+    weakest = min(scores, key=scores.get)
+
+    if strongest != weakest and scores[strongest] - scores[weakest] >= 25:
+        st.warning(f"Consider rotating from {weakest} → {strongest}")
+    else:
+        st.success("Portfolio balance acceptable.")
+
+# ===================================================
+# ========== PHASE 8 — ETF INCOME OUTLOOK ===========
+# ===================================================
+
+with st.expander("🔮 Income Outlook (Phase 8)"):
+    for etf in ETF_LIST:
+        st.write(etf)
+
+# ===================================================
+# ================= EXPORT & HISTORY =================
+# ===================================================
+
+with st.expander("📤 Export & History"):
+    if st.button("💾 Save Snapshot"):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        df.to_csv(os.path.join(SNAP_DIR, f"{ts}.csv"), index=False)
+        st.success("Snapshot saved.")
+
+st.caption("v19.2 • Phase-10 Strategy Mode added • all prior phases restored")
