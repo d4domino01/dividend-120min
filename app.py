@@ -7,6 +7,16 @@ import streamlit.components.v1 as components
 import numpy as np
 import altair as alt
 
+# ================= HELPERS =================
+
+def safe_float(x):
+    try:
+        if isinstance(x, str):
+            x = x.replace(",", ".")
+        return float(x)
+    except:
+        return 0.0
+
 # ================= PAGE =================
 
 st.markdown(
@@ -17,11 +27,7 @@ st.markdown(
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
-DEFAULT_SHARES = {
-    "QDTE": 125,
-    "CHPY": 63,
-    "XDTE": 84
-}
+DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
@@ -56,12 +62,12 @@ load_from_browser()
 
 if "holdings" not in st.session_state:
     st.session_state.holdings = {
-        t: {"shares": DEFAULT_SHARES.get(t, 0), "weekly_div": 0.0}
+        t: {"shares": DEFAULT_SHARES.get(t, 0), "weekly_div": ""}
         for t in ETF_LIST
     }
 
 if "cash" not in st.session_state:
-    st.session_state.cash = 0.0
+    st.session_state.cash = "0"
 
 # ================= DATA =================
 
@@ -131,7 +137,6 @@ def get_vol_regime(ticker):
 rows = []
 drawdown_map = {}
 vol_regime_map = {}
-
 auto_div_map = {}
 
 for t in ETF_LIST:
@@ -147,7 +152,7 @@ for t in ETF_LIST:
     vol_regime_map[t] = regime
 
     shares = st.session_state.holdings[t]["shares"]
-    manual_weekly = st.session_state.holdings[t]["weekly_div"]
+    manual_weekly = safe_float(st.session_state.holdings[t]["weekly_div"])
 
     weekly_income_used = manual_weekly if manual_weekly > 0 else auto_div * shares
 
@@ -159,7 +164,6 @@ for t in ETF_LIST:
         "Ticker": t,
         "Shares": shares,
         "Price": price,
-        "Manual Weekly": manual_weekly,
         "Auto Div/Share": round(auto_div, 4),
         "Weekly Income Used": round(weekly_income_used, 2),
         "Annual Income": round(annual_income, 2),
@@ -172,7 +176,7 @@ for t in ETF_LIST:
 
 df = pd.DataFrame(rows)
 
-total_value = df["Value"].sum() + st.session_state.cash
+total_value = df["Value"].sum() + safe_float(st.session_state.cash)
 total_annual_income = df["Annual Income"].sum()
 total_monthly_income = total_annual_income / 12
 
@@ -193,58 +197,60 @@ st.markdown(
 )
 
 # ====================================================
-# ===== INCOME vs PRICE DAMAGE ENGINE =================
+# ===== ETF VALUE IMPACT ENGINE ======================
 # ====================================================
 
-st.markdown("### 💥 Income vs Price Damage (Capital Protection)")
+st.markdown("### 💥 ETF Value Impact vs Income (Per ETF)")
 
-damage_rows = []
+impact_rows = []
 reduce_count = 0
 
 for t in ETF_LIST:
     hist = get_price_history(t, 60)
 
     if hist is None or len(hist) < 25:
-        price_now = price_14 = price_28 = None
+        chg14 = chg28 = 0
     else:
         price_now = hist["Close"].iloc[-1]
         price_14 = hist["Close"].iloc[-10]
         price_28 = hist["Close"].iloc[-20]
+        shares = st.session_state.holdings[t]["shares"]
 
-    shares = st.session_state.holdings[t]["shares"]
-    manual_weekly = st.session_state.holdings[t]["weekly_div"]
+        chg14 = (price_now - price_14) * shares
+        chg28 = (price_now - price_28) * shares
+
+    manual_weekly = safe_float(st.session_state.holdings[t]["weekly_div"])
     auto_div = auto_div_map[t]
-
+    shares = st.session_state.holdings[t]["shares"]
     weekly_income = manual_weekly if manual_weekly > 0 else auto_div * shares
 
-    dmg14 = max(0, (price_14 - price_now)) * shares if price_14 else 0
-    dmg28 = max(0, (price_28 - price_now)) * shares if price_28 else 0
-
-    if weekly_income > dmg14 and weekly_income > dmg28:
+    if chg14 >= 0 and chg28 >= 0:
         signal = "🟢 HOLD"
-    elif weekly_income > dmg14 or weekly_income > dmg28:
+    elif weekly_income >= abs(chg28):
+        signal = "🟡 WATCH"
+    elif weekly_income >= abs(chg14):
         signal = "🟡 WATCH"
     else:
         signal = "🔴 REDUCE"
         reduce_count += 1
 
-    damage_rows.append({
+    impact_rows.append({
         "ETF": t,
         "Weekly Income ($)": round(weekly_income, 2),
-        "Damage 14d ($)": round(dmg14, 2),
-        "Damage 28d ($)": round(dmg28, 2),
-        "Net vs 14d": round(weekly_income - dmg14, 2),
-        "Net vs 28d": round(weekly_income - dmg28, 2),
+        "Value Change 14d ($)": round(chg14, 2),
+        "Value Change 28d ($)": round(chg28, 2),
+        "Net vs 14d": round(weekly_income + chg14, 2),
+        "Net vs 28d": round(weekly_income + chg28, 2),
         "Signal": signal
     })
 
-df_damage = pd.DataFrame(damage_rows)
-st.dataframe(df_damage, use_container_width=True)
+df_impact = pd.DataFrame(impact_rows)
+st.dataframe(df_impact, use_container_width=True)
 
 if reduce_count > 0:
-    st.error(f"🚨 {reduce_count} ETF(s) losing more in price than earning in income.")
+    st.error(f"🚨 {reduce_count} ETF(s) where income is not covering price losses.")
 else:
-    st.success("✅ Income currently covering recent price damage.")
+    st.success("✅ Income is currently offsetting price movement.")
 
 # ====================================================
 # ========== STRATEGY MODE ENGINE =====================
@@ -291,10 +297,10 @@ with st.expander("📁 Portfolio", expanded=True):
             )
 
         with c2:
-            st.session_state.holdings[t]["weekly_div"] = st.number_input(
-                "Weekly Distribution ($) — leave 0 to auto-use last payout",
-                min_value=0.0, step=0.01,
-                value=st.session_state.holdings[t]["weekly_div"], key=f"d_{t}"
+            st.session_state.holdings[t]["weekly_div"] = st.text_input(
+                "Weekly Distribution ($) — use , or .",
+                value=str(st.session_state.holdings[t]["weekly_div"]),
+                key=f"d_{t}"
             )
 
         r = df[df.Ticker == t].iloc[0]
@@ -312,8 +318,9 @@ with st.expander("📁 Portfolio", expanded=True):
     with c3:
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
-    st.session_state.cash = st.number_input(
-        "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=st.session_state.cash
+    st.session_state.cash = st.text_input(
+        "💰 Cash Wallet ($)",
+        value=str(st.session_state.cash)
     )
 
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
@@ -362,4 +369,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v19.8 • Auto dividend fallback + proper price damage windows")
+st.caption("v20.0 • ETF Value Impact Engine • Income-adjusted capital protection")
