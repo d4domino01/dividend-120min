@@ -87,7 +87,7 @@ def get_auto_div_ps(ticker):
         divs = yf.Ticker(ticker).dividends
         if len(divs) == 0:
             return 0.0
-        return float(divs.iloc[-1])  # per share
+        return float(divs.iloc[-1])
     except:
         return 0.0
 
@@ -112,14 +112,12 @@ def get_drawdown(ticker):
 # ================= BUILD MAIN TABLE =================
 
 rows = []
-drawdown_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
     auto_ps = get_auto_div_ps(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
-    drawdown_map[t] = drawdown
 
     shares = st.session_state.holdings[t]["shares"]
     manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
@@ -145,10 +143,6 @@ for t in ETF_LIST:
 
 df = pd.DataFrame(rows)
 
-total_value = df["Value"].sum() + safe_float(st.session_state.cash)
-total_annual_income = df["Weekly Income"].sum() * 52
-total_monthly_income = total_annual_income / 12
-
 # ================= MARKET CONDITION =================
 
 down = (df["Trend"] == "Down").sum()
@@ -160,57 +154,11 @@ st.markdown(
 )
 
 # ====================================================
-# ===== ETF VALUE IMPACT vs INCOME ===================
-# ====================================================
-
-st.markdown("### 💥 ETF Value Impact vs Income (per ETF)")
-
-impact = []
-reduce_count = 0
-
-for t in ETF_LIST:
-    hist = get_hist(t)
-    shares = st.session_state.holdings[t]["shares"]
-
-    if hist is not None and len(hist) > 25:
-        now = hist["Close"].iloc[-1]
-        d14 = hist["Close"].iloc[-10]
-        d28 = hist["Close"].iloc[-20]
-        chg14 = (now - d14) * shares
-        chg28 = (now - d28) * shares
-    else:
-        chg14 = chg28 = 0
-
-    weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
-
-    if chg14 >= 0 and chg28 >= 0:
-        sig = "🟢 HOLD"
-    elif weekly >= abs(chg28):
-        sig = "🟡 WATCH"
-    elif weekly >= abs(chg14):
-        sig = "🟡 WATCH"
-    else:
-        sig = "🔴 REDUCE"
-        reduce_count += 1
-
-    impact.append({
-        "ETF": t,
-        "Weekly Income ($)": round(weekly, 2),
-        "Value Change 14d ($)": round(chg14, 2),
-        "Value Change 28d ($)": round(chg28, 2),
-        "Signal": sig
-    })
-
-st.dataframe(pd.DataFrame(impact), use_container_width=True)
-
-# ====================================================
 # ================= PORTFOLIO ========================
 # ====================================================
 
 with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
-
-        # >>> ONLY CHANGE: ETF LABEL <<<
         st.markdown(f"### 📈 {t}")
 
         c1, c2 = st.columns(2)
@@ -228,11 +176,16 @@ with st.expander("📁 Portfolio", expanded=True):
             )
 
         r = df[df.Ticker == t].iloc[0]
-        st.caption(
-            f"Price: ${r.Price} | Div/Share: {r['Div / Share']} | Drawdown: {r['Drawdown %']}%"
-        )
+        st.caption(f"Price: ${r.Price} | Div/Share: {r['Div / Share']} | Drawdown: {r['Drawdown %']}%")
         st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
+
+    # ✅ CASH INPUT MOVED UP (FIX)
+    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
+
+    total_value = df["Value"].sum() + safe_float(st.session_state.cash)
+    total_annual_income = df["Weekly Income"].sum() * 52
+    total_monthly_income = total_annual_income / 12
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -242,13 +195,9 @@ with st.expander("📁 Portfolio", expanded=True):
     with c3:
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
-    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
-
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
-# ====================================================
-# ================= WARNINGS =========================
-# ====================================================
+# ================= WARNINGS =================
 
 with st.expander("🚨 Warnings & Risk"):
     for _, r in df.iterrows():
@@ -257,9 +206,7 @@ with st.expander("🚨 Warnings & Risk"):
         if r["Drawdown %"] > 8:
             st.error(f"{r.Ticker} drawdown {r['Drawdown %']}%")
 
-# ====================================================
-# ================= MARKET STRESS ====================
-# ====================================================
+# ================= MARKET STRESS =================
 
 with st.expander("📉 Market Stress & Early Warnings"):
     for t in ETF_LIST:
@@ -268,18 +215,14 @@ with st.expander("📉 Market Stress & Early Warnings"):
             move = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
             st.write(f"{t}: {move:.2f}% daily move")
 
-# ====================================================
-# ================= OPTIMIZER ========================
-# ====================================================
+# ================= OPTIMIZER =================
 
 with st.expander("🎯 Allocation Optimizer (Phase 6)"):
     ranked = df.sort_values("Trend", ascending=False)
     for _, r in ranked.iterrows():
         st.write(f"{r.Ticker} | Trend: {r.Trend}")
 
-# ====================================================
-# ================= REBALANCE ========================
-# ====================================================
+# ================= REBALANCE =================
 
 with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
     strongest = df[df.Trend == "Up"]
@@ -289,17 +232,13 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
     else:
         st.success("No rebalance needed")
 
-# ====================================================
-# ================= INCOME OUTLOOK ===================
-# ====================================================
+# ================= INCOME OUTLOOK =================
 
 with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-# ====================================================
-# ================= EXPORT ===========================
-# ====================================================
+# ================= EXPORT =================
 
 with st.expander("📤 Export & History"):
     if st.button("Save Snapshot"):
@@ -309,4 +248,4 @@ with st.expander("📤 Export & History"):
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", csv, "portfolio.csv", "text/csv")
 
-st.caption("v20.4 • Per-share dividend model • ETF value impact vs income")
+st.caption("v20.5 • Cash wallet included in portfolio value")
