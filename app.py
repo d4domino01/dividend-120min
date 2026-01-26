@@ -17,6 +17,12 @@ st.markdown(
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 
+DEFAULT_SHARES = {
+    "QDTE": 125,
+    "CHPY": 63,
+    "XDTE": 84
+}
+
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
@@ -49,7 +55,10 @@ load_from_browser()
 # ================= SESSION =================
 
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {t: {"shares": 0, "weekly_div": 0.0} for t in ETF_LIST}
+    st.session_state.holdings = {
+        t: {"shares": DEFAULT_SHARES.get(t, 0), "weekly_div": 0.0}
+        for t in ETF_LIST
+    }
 
 if "cash" not in st.session_state:
     st.session_state.cash = 0.0
@@ -62,16 +71,6 @@ def get_price(ticker):
         return round(yf.Ticker(ticker).history(period="5d")["Close"].iloc[-1], 2)
     except:
         return None
-
-@st.cache_data(ttl=900)
-def get_auto_div(ticker):
-    try:
-        divs = yf.Ticker(ticker).dividends
-        if len(divs) == 0:
-            return 0.0
-        return round(divs[-1], 4)
-    except:
-        return 0.0
 
 @st.cache_data(ttl=900)
 def get_trend(ticker):
@@ -111,7 +110,7 @@ def get_vol_regime(ticker):
         return "Unknown", 0
 
 @st.cache_data(ttl=900)
-def get_price_history(ticker, days=35):
+def get_price_history(ticker, days=45):
     try:
         return yf.Ticker(ticker).history(period=f"{days}d")
     except:
@@ -125,7 +124,6 @@ vol_regime_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
-    auto_div = get_auto_div(t)
     trend = get_trend(t)
     drawdown = get_drawdown(t)
     regime, ratio = get_vol_regime(t)
@@ -144,8 +142,7 @@ for t in ETF_LIST:
         "Ticker": t,
         "Shares": shares,
         "Price": price,
-        "Weekly Div": weekly_div,
-        "Auto Div": auto_div,
+        "Weekly Div (manual)": weekly_div,
         "Annual Income": round(annual_income, 2),
         "Monthly Income": round(monthly_income, 2),
         "Value": round(value, 2),
@@ -177,22 +174,22 @@ st.markdown(
 )
 
 # ====================================================
-# ===== NEW: INCOME vs PRICE DAMAGE ENGINE ===========
+# ===== INCOME vs PRICE DAMAGE ENGINE (MANUAL DIV) ===
 # ====================================================
 
-st.markdown("### 💥 Income vs Price Damage (Risk Control)")
+st.markdown("### 💥 Income vs Price Damage (Capital Protection)")
 
 damage_rows = []
 reduce_count = 0
 
 for t in ETF_LIST:
-    hist = get_price_history(t, 35)
-    if hist is None or len(hist) < 30:
+    hist = get_price_history(t, 45)
+    if hist is None or len(hist) < 25:
         continue
 
     price_now = hist["Close"].iloc[-1]
-    price_14 = hist["Close"].iloc[-15]
-    price_28 = hist["Close"].iloc[-29]
+    price_14 = hist["Close"].iloc[-10]   # ~2 trading weeks
+    price_28 = hist["Close"].iloc[-20]   # ~4 trading weeks
 
     shares = st.session_state.holdings[t]["shares"]
     weekly_div = st.session_state.holdings[t]["weekly_div"]
@@ -211,7 +208,8 @@ for t in ETF_LIST:
 
     damage_rows.append({
         "ETF": t,
-        "Dividend ($)": round(div_income, 2),
+        "Shares": shares,
+        "Weekly Income ($)": round(div_income, 2),
         "Damage 14d ($)": round(dmg14, 2),
         "Damage 28d ($)": round(dmg28, 2),
         "Net vs 14d": round(div_income - dmg14, 2),
@@ -225,7 +223,7 @@ st.dataframe(df_damage, use_container_width=True)
 if reduce_count > 0:
     st.error(f"🚨 {reduce_count} ETF(s) losing more in price than earning in dividends.")
 else:
-    st.success("✅ Dividends currently covering recent price damage.")
+    st.success("✅ Weekly income currently covering recent price damage.")
 
 # ====================================================
 # ========== MARKET STRESS — PHASE 1 + 9 =============
@@ -286,20 +284,20 @@ for etf in ETF_LIST:
 # ========== PHASE 10 — STRATEGY MODE ENGINE =========
 # ====================================================
 
-def determine_strategy_mode(df, stress_scores, drawdown_map):
+def determine_strategy_mode(df, stress_scores, drawdown_map, reduce_count):
     down = (df["Trend"] == "Down").sum()
     max_dd = max(drawdown_map.values()) if drawdown_map else 0
     avg_stress = np.mean(list(stress_scores.values())) if stress_scores else 0
 
-    if down >= 2 or max_dd >= 10 or avg_stress >= 60:
-        return "PROTECT", "Reduce exposure • Preserve capital • Avoid new buys"
+    if reduce_count >= 1 or down >= 2 or max_dd >= 10 or avg_stress >= 60:
+        return "PROTECT", "Income not covering losses • Reduce exposure • Preserve capital"
 
     if down == 1 or max_dd >= 6 or avg_stress >= 35:
         return "OBSERVE", "Be selective • Avoid overtrading • Monitor closely"
 
     return "ACCUMULATE", "Add to strongest ETF • Reinvest income aggressively"
 
-strategy_mode, strategy_hint = determine_strategy_mode(df, stress_scores, drawdown_map)
+strategy_mode, strategy_hint = determine_strategy_mode(df, stress_scores, drawdown_map, reduce_count)
 
 MODE_COLOR = {
     "ACCUMULATE": "🟢",
@@ -340,7 +338,7 @@ with st.expander("📁 Portfolio", expanded=True):
 
         r = df[df.Ticker == t].iloc[0]
         st.caption(
-            f"Price: ${r.Price} | Auto div: {r['Auto Div']} | Drawdown: {r['Drawdown %']}% | Premium: {r['Premium Regime']}"
+            f"Price: ${r.Price} | Drawdown: {r['Drawdown %']}% | Premium: {r['Premium Regime']}"
         )
         st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
@@ -545,4 +543,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v19.6 • Income vs Price Damage Engine added • All phases preserved")
+st.caption("v19.7 • Capital Protection Engine integrated • Manual income trusted over Yahoo")
