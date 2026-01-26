@@ -21,8 +21,8 @@ def safe_float(x):
 # ================= PAGE =================
 
 st.markdown(
-    "<div style='font-size:20px; font-weight:700;'>📈 Income Strategy Engine</div>"
-    "<div style='font-size:12px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
+    "<div style='font-size:22px; font-weight:700;'>📈 Income Strategy Engine</div>"
+    "<div style='font-size:13px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
     unsafe_allow_html=True
 )
 
@@ -175,7 +175,7 @@ st.markdown(
 
 # ================= VALUE IMPACT =================
 
-st.markdown("#### 💥 ETF Value Impact vs Income (per ETF)")
+st.markdown("##### 💥 ETF Value Impact vs Income (per ETF)")
 
 impact = []
 
