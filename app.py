@@ -209,6 +209,10 @@ st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
 with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
+
+        # >>> ONLY CHANGE: ETF LABEL <<<
+        st.markdown(f"### 📈 {t}")
+
         c1, c2 = st.columns(2)
 
         with c1:
