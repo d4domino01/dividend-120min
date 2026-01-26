@@ -32,7 +32,7 @@ SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
 # =========================================================
-# ============== CLIENT-SIDE STORAGE ======================
+# ============== CLIENT STORAGE ===========================
 # =========================================================
 
 def load_from_browser():
@@ -60,10 +60,7 @@ load_from_browser()
 # ================= SESSION =================
 
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {
-        t: {"shares": DEFAULT_SHARES.get(t, 0), "weekly_div": ""}
-        for t in ETF_LIST
-    }
+    st.session_state.holdings = {t: {"shares": DEFAULT_SHARES[t], "weekly_div": ""} for t in ETF_LIST}
 
 if "cash" not in st.session_state:
     st.session_state.cash = ""
@@ -71,7 +68,7 @@ if "cash" not in st.session_state:
 # ================= DATA =================
 
 @st.cache_data(ttl=600)
-def get_price_history(ticker, days=60):
+def get_hist(ticker, days=60):
     try:
         return yf.Ticker(ticker).history(period=f"{days}d")
     except:
@@ -112,137 +109,73 @@ def get_drawdown(ticker):
     except:
         return 0
 
-@st.cache_data(ttl=600)
-def get_vol_regime(ticker):
-    try:
-        df = yf.Ticker(ticker).history(period="25d")
-        returns = df["Close"].pct_change().dropna()
-        short_vol = returns[-5:].std() * 100
-        long_vol = returns[-20:].std() * 100
-        if long_vol == 0:
-            return "Unknown", 0
-        ratio = short_vol / long_vol
-        if ratio < 0.6:
-            return "Low Premium", ratio
-        elif ratio > 1.3:
-            return "High Premium", ratio
-        else:
-            return "Normal", ratio
-    except:
-        return "Unknown", 0
-
-# ================= BUILD CURRENT DATA =================
+# ================= BUILD TABLE =================
 
 rows = []
 drawdown_map = {}
-vol_regime_map = {}
-auto_div_map = {}
 
 for t in ETF_LIST:
     price = get_price(t)
     auto_div = get_auto_div(t)
-    auto_div_map[t] = auto_div
-
     trend = get_trend(t)
     drawdown = get_drawdown(t)
-    regime, ratio = get_vol_regime(t)
-
     drawdown_map[t] = drawdown
-    vol_regime_map[t] = regime
 
     shares = st.session_state.holdings[t]["shares"]
-    manual_weekly = safe_float(st.session_state.holdings[t]["weekly_div"])
+    manual = safe_float(st.session_state.holdings[t]["weekly_div"])
+    weekly = manual if manual > 0 else auto_div * shares
 
-    weekly_income_used = manual_weekly if manual_weekly > 0 else auto_div * shares
-
-    annual_income = weekly_income_used * 52
-    monthly_income = annual_income / 12
     value = (price or 0) * shares
+    annual = weekly * 52
+    monthly = annual / 12
 
     rows.append({
-        "Ticker": t,
-        "Shares": shares,
-        "Price": price,
-        "Auto Div/Share": round(auto_div, 4),
-        "Weekly Income Used": round(weekly_income_used, 2),
-        "Annual Income": round(annual_income, 2),
-        "Monthly Income": round(monthly_income, 2),
-        "Value": round(value, 2),
-        "Trend": trend,
-        "Drawdown %": drawdown,
-        "Premium Regime": regime
+        "Ticker": t, "Shares": shares, "Price": price,
+        "Weekly Income": round(weekly,2), "Monthly Income": round(monthly,2),
+        "Value": round(value,2), "Trend": trend, "Drawdown %": drawdown
     })
 
 df = pd.DataFrame(rows)
 
-total_value = df["Value"].sum() + safe_float(st.session_state.cash)
-total_annual_income = df["Annual Income"].sum()
-total_monthly_income = total_annual_income / 12
-
 # ================= MARKET CONDITION =================
 
-down = (df["Trend"] == "Down").sum()
-if down >= 2:
-    market = "🔴 SELL / DEFENSIVE"
-elif down == 1:
-    market = "🟡 HOLD / CAUTION"
-else:
-    market = "🟢 BUY / ACCUMULATE"
+down = (df["Trend"]=="Down").sum()
+market = "🟢 BUY" if down==0 else "🟡 HOLD" if down==1 else "🔴 DEFENSIVE"
 
-st.markdown(
-    f"<div style='padding:10px;border-radius:8px;background:#111'><b>🌍 Market Condition:</b> {market}</div>",
-    unsafe_allow_html=True,
-)
+st.markdown(f"<div style='padding:8px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>", unsafe_allow_html=True)
 
 # ====================================================
-# ===== ETF VALUE IMPACT vs INCOME ===================
+# ===== ETF VALUE IMPACT SECTION =====================
 # ====================================================
 
-st.markdown("### 💥 ETF Value Impact vs Income (Per ETF)")
+st.markdown("### 💥 ETF Value Impact vs Income")
 
-impact_rows = []
+impact = []
 reduce_count = 0
 
 for t in ETF_LIST:
-    hist = get_price_history(t, 60)
-
-    if hist is None or len(hist) < 25:
-        chg14 = chg28 = 0
-    else:
-        price_now = hist["Close"].iloc[-1]
-        price_14 = hist["Close"].iloc[-10]
-        price_28 = hist["Close"].iloc[-20]
-        shares = st.session_state.holdings[t]["shares"]
-        chg14 = (price_now - price_14) * shares
-        chg28 = (price_now - price_28) * shares
-
-    manual_weekly = safe_float(st.session_state.holdings[t]["weekly_div"])
-    auto_div = auto_div_map[t]
+    hist = get_hist(t)
     shares = st.session_state.holdings[t]["shares"]
-    weekly_income = manual_weekly if manual_weekly > 0 else auto_div * shares
 
-    if chg14 >= 0 and chg28 >= 0:
-        signal = "🟢 HOLD"
-    elif weekly_income >= abs(chg28):
-        signal = "🟡 WATCH"
-    elif weekly_income >= abs(chg14):
-        signal = "🟡 WATCH"
+    if hist is not None and len(hist)>25:
+        now = hist["Close"].iloc[-1]
+        d14 = hist["Close"].iloc[-10]
+        d28 = hist["Close"].iloc[-20]
+        chg14 = (now-d14)*shares
+        chg28 = (now-d28)*shares
     else:
-        signal = "🔴 REDUCE"
-        reduce_count += 1
+        chg14 = chg28 = 0
 
-    impact_rows.append({
-        "ETF": t,
-        "Weekly Income ($)": round(weekly_income, 2),
-        "Value Change 14d ($)": round(chg14, 2),
-        "Value Change 28d ($)": round(chg28, 2),
-        "Net vs 14d": round(weekly_income + chg14, 2),
-        "Net vs 28d": round(weekly_income + chg28, 2),
-        "Signal": signal
-    })
+    weekly = df[df.Ticker==t]["Weekly Income"].iloc[0]
 
-df_impact = pd.DataFrame(impact_rows)
-st.dataframe(df_impact, use_container_width=True)
+    if chg14>=0 and chg28>=0: sig="🟢 HOLD"
+    elif weekly>=abs(chg28) or weekly>=abs(chg14): sig="🟡 WATCH"
+    else:
+        sig="🔴 REDUCE"; reduce_count+=1
+
+    impact.append({"ETF":t,"Weekly $":round(weekly,2),"14d $":round(chg14,2),"28d $":round(chg28,2),"Signal":sig})
+
+st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
 # ====================================================
 # ================= PORTFOLIO ========================
@@ -251,63 +184,31 @@ st.dataframe(df_impact, use_container_width=True)
 with st.expander("📁 Portfolio", expanded=True):
 
     for t in ETF_LIST:
-        st.markdown(f"### {t}")
-        c1, c2 = st.columns(2)
-
+        c1,c2=st.columns(2)
         with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input(
-                "Shares", min_value=0, step=1,
-                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
-            )
-
+            st.session_state.holdings[t]["shares"]=st.number_input("Shares",0,step=1,value=st.session_state.holdings[t]["shares"],key=f"s{t}")
         with c2:
-            st.session_state.holdings[t]["weekly_div"] = st.text_input(
-                "Weekly Distribution ($) — use , or .",
-                value=str(st.session_state.holdings[t]["weekly_div"]),
-                key=f"d_{t}"
-            )
-
-        r = df[df.Ticker == t].iloc[0]
-        st.caption(
-            f"Price: ${r.Price} | Auto div/share: {r['Auto Div/Share']} | Drawdown: {r['Drawdown %']}% | Premium: {r['Premium Regime']}"
-        )
-        st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
+            st.session_state.holdings[t]["weekly_div"]=st.text_input("Weekly Div ($)",value=str(st.session_state.holdings[t]["weekly_div"]),key=f"d{t}")
+        r=df[df.Ticker==t].iloc[0]
+        st.caption(f"Value ${r.Value} | Monthly ${r['Monthly Income']}")
         st.divider()
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
-    with c2:
-        st.metric("💸 Annual Income", f"${total_annual_income:,.2f}")
-    with c3:
-        st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
+# ====================================================
+# ================= WARNINGS =========================
+# ====================================================
 
-    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
-
-save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
+with st.expander("🚨 Warnings & Risk"):
+    for _,r in df.iterrows():
+        if r["Trend"]=="Down": st.warning(f"{r.Ticker} in downtrend")
+        if r["Drawdown %"]>8: st.error(f"{r.Ticker} drawdown {r['Drawdown %']}%")
 
 # ====================================================
-# ================= EXPORT & HISTORY =================
+# ================= EXPORT ===========================
 # ====================================================
 
 with st.expander("📤 Export & History"):
+    if st.button("Save Snapshot"):
+        df.to_csv(os.path.join(SNAP_DIR,f"{datetime.now()}.csv"),index=False)
+        st.success("Saved")
 
-    if st.button("🗑️ Reset Snapshot History"):
-        for f in glob.glob(os.path.join(SNAP_DIR, "*.csv")):
-            os.remove(f)
-        st.success("Snapshot history cleared.")
-
-    if st.button("💾 Save Snapshot"):
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        df.to_csv(os.path.join(SNAP_DIR, f"{ts}.csv"), index=False)
-        st.success("Snapshot saved.")
-
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "⬇️ Download Portfolio CSV",
-        data=csv,
-        file_name=f"portfolio_{datetime.now().date()}.csv",
-        mime="text/csv"
-    )
-
-st.caption("v20.1 • UI preserved • ETF value impact vs income • EU decimal safe")
+st.caption("v20.2 • ALL DROPDOWNS RESTORED • ETF VALUE IMPACT ACTIVE")
