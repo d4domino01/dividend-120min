@@ -157,16 +157,16 @@ for t in ETF_LIST:
     monthly = annual / 12
 
     rows.append({
-        "Ticker": t,
-        "Shares": shares,
-        "Price": price,
-        "Div / Share": round(div_ps, 4),
-        "Weekly Income": round(weekly_income, 2),
-        "Monthly Income": round(monthly, 2),
-        "Value": round(value, 2),
-s        "Trend": trend,
-        "Drawdown %": drawdown
-    })
+    "Ticker": t,
+    "Shares": shares,
+    "Price": price,
+    "Div / Share": round(div_ps, 4),
+    "Weekly Income": round(weekly_income, 2),
+    "Monthly Income": round(monthly, 2),
+    "Value": round(value, 2),
+    "Trend": trend,
+    "Drawdown %": drawdown
+})
 
 df = pd.DataFrame(rows)
 
