@@ -35,11 +35,11 @@ UNDERLYING_MAP = {
     "CHPY": "SOXX"
 }
 
-# RSS fallback sources
+# ✅ Google News fallback (reliable in Streamlit)
 RSS_MAP = {
-    "QDTE": "https://www.nasdaq.com/feed/rssoutbound?category=Technology",
-    "CHPY": "https://www.nasdaq.com/feed/rssoutbound?category=Semiconductors",
-    "XDTE": "https://www.nasdaq.com/feed/rssoutbound?category=Markets"
+    "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market",
+    "CHPY": "https://news.google.com/rss/search?q=semiconductor+stocks+sector+market",
+    "XDTE": "https://news.google.com/rss/search?q=S%26P+500+market+news"
 }
 
 SNAP_DIR = "snapshots"
@@ -164,7 +164,7 @@ for t in ETF_LIST:
         "Weekly Income": round(weekly_income, 2),
         "Monthly Income": round(monthly, 2),
         "Value": round(value, 2),
-        "Trend": trend,
+s        "Trend": trend,
         "Drawdown %": drawdown
     })
 
@@ -370,4 +370,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v20.9 • Sector/index fallback news added • No features removed")
+st.caption("v21.0 • Reliable Google News fallback • No features removed")
