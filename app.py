@@ -234,7 +234,7 @@ with st.expander("🚨 Warnings & Risk"):
         st.success("✅ No immediate capital risks detected.")
 
 # ===================================================
-# ========== MARKET STRESS — PHASE 1 =================
+# ========== MARKET STRESS — PHASE 1 + 9 =============
 # ===================================================
 
 with st.expander("📉 Market Stress & Early Warnings"):
@@ -245,24 +245,21 @@ with st.expander("📉 Market Stress & Early Warnings"):
         "XDTE": ["SPY", "VIX"]
     }
 
+    UNDERLYING_MAP = {
+        "QDTE": ["QQQ"],
+        "CHPY": ["SOXX", "NVDA", "AMD"],
+        "XDTE": ["SPY"]
+    }
+
     @st.cache_data(ttl=600)
-    def get_stress_metrics(ticker):
+    def get_daily_move(ticker):
         try:
-            df = yf.Ticker(ticker).history(period="15d")
-            if len(df) < 10:
+            df = yf.Ticker(ticker).history(period="5d")
+            if len(df) < 2:
                 return None
             prev = df["Close"].iloc[-2]
             last = df["Close"].iloc[-1]
-            daily_pct = (last - prev) / prev * 100
-            returns = df["Close"].pct_change().dropna()
-            vol = returns[-10:].std() * 100
-            if "Volume" in df:
-                avg_vol = df["Volume"][-11:-1].mean()
-                today_vol = df["Volume"].iloc[-1]
-                vol_spike = today_vol / avg_vol if avg_vol > 0 else 1
-            else:
-                vol_spike = 1
-            return round(daily_pct,2), round(vol,2), round(vol_spike,2)
+            return round((last - prev) / prev * 100, 2)
         except:
             return None
 
@@ -270,26 +267,42 @@ with st.expander("📉 Market Stress & Early Warnings"):
 
     for etf in ETF_LIST:
         st.markdown(f"### {etf}")
-        proxies = STRESS_MAP.get(etf, [])
+
         stress_score = 0
 
-        for p in proxies:
-            data = get_stress_metrics(p)
-            if data is None:
+        # ----- Phase 1: proxy stress -----
+        for p in STRESS_MAP.get(etf, []):
+            move = get_daily_move(p)
+            if move is None:
                 st.caption(f"{p}: data unavailable")
                 continue
-            daily, vol, vol_spike = data
-            msg = f"{p}: {daily}% | vol {vol}% | vol x{vol_spike}"
-            if daily <= -2 and vol_spike >= 1.5:
+            msg = f"{p}: {move}%"
+            if move <= -2:
                 st.error("🚨 " + msg)
-                stress_score += 35
-            elif daily <= -1:
+                stress_score += 25
+            elif move <= -1:
                 st.warning("⚠️ " + msg)
-                stress_score += 20
-            elif daily >= 2:
+                stress_score += 15
+            elif move >= 2:
                 st.success("📈 " + msg)
             else:
                 st.caption(msg)
+
+        # ----- Phase 9: underlying exposure stress -----
+        bad_underlyings = 0
+        for u in UNDERLYING_MAP.get(etf, []):
+            move = get_daily_move(u)
+            if move is None:
+                continue
+            if move <= -1:
+                bad_underlyings += 1
+
+        if bad_underlyings >= 2:
+            stress_score += 25
+            st.warning("⚠️ Multiple underlying components weakening")
+        elif bad_underlyings == 1:
+            stress_score += 10
+            st.caption("Underlying component showing weakness")
 
         stress_scores[etf] = stress_score
         st.markdown(f"**Stress Score: {min(stress_score,100)}/100**")
@@ -300,9 +313,7 @@ with st.expander("📉 Market Stress & Early Warnings"):
 # ===================================================
 
 with st.expander("🎯 Allocation Optimizer (Phase 6)"):
-
     scores = {}
-
     for etf in ETF_LIST:
         score = 0
         if df[df.Ticker == etf]["Trend"].iloc[0] == "Up":
@@ -316,7 +327,6 @@ with st.expander("🎯 Allocation Optimizer (Phase 6)"):
         scores[etf] = score
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
     for etf, sc in ranked:
         st.write(f"**{etf}** → Score: {sc}/100")
 
@@ -333,7 +343,6 @@ with st.expander("🎯 Allocation Optimizer (Phase 6)"):
 # ===================================================
 
 with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
-
     strongest = max(scores, key=scores.get)
     weakest = min(scores, key=scores.get)
 
@@ -361,23 +370,20 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
         st.success("✅ Portfolio balance acceptable — no rebalance suggested.")
 
 # ===================================================
-# ========== PHASE 8 — ETF INCOME OUTLOOK (FIXED) ====
+# ========== PHASE 8 — ETF INCOME OUTLOOK ============
 # ===================================================
 
 with st.expander("🔮 Income Outlook (Phase 8 — Normalized Next 4 Weeks)"):
-
     st.caption("Uses last 8 weekly payouts and removes top 2 year-end spike payments.")
 
     @st.cache_data(ttl=900)
     def get_normalized_weekly_div(ticker):
         try:
             divs = yf.Ticker(ticker).dividends.tail(8)
-
             if len(divs) < 6:
                 return None
-
             vals = sorted(divs.values)
-            trimmed = vals[:-2]   # remove top 2 spikes
+            trimmed = vals[:-2]
             avg = float(np.mean(trimmed))
             return round(avg, 4)
         except:
@@ -388,16 +394,14 @@ with st.expander("🔮 Income Outlook (Phase 8 — Normalized Next 4 Weeks)"):
         est_weekly = get_normalized_weekly_div(etf)
 
         st.markdown(f"### {etf}")
-
         if est_weekly is None:
             st.caption("Dividend history unavailable.")
             st.divider()
             continue
 
         est_4w = est_weekly * shares * 4
-
         st.write(f"Estimated realistic weekly distribution: **${est_weekly}**")
-        st.write(f"Projected next 4 weeks income (based on holdings): **${est_4w:,.2f}**")
+        st.write(f"Projected next 4 weeks income: **${est_4w:,.2f}**")
 
         if shares == 0:
             st.info("Set share amount in Portfolio to see income projection.")
@@ -433,17 +437,17 @@ with st.expander("📤 Export & History"):
         with st.expander("📊 View History Charts"):
             st.subheader("📈 Monthly Income Trend")
             inc = hist_df.groupby("Date")["Monthly Income"].sum().reset_index()
-            chart1 = alt.Chart(inc).mark_line().encode(
-                x="Date", y="Monthly Income"
+            st.altair_chart(
+                alt.Chart(inc).mark_line().encode(x="Date", y="Monthly Income"),
+                use_container_width=True
             )
-            st.altair_chart(chart1, use_container_width=True)
 
             st.subheader("📈 Portfolio Value Trend")
             val = hist_df.groupby("Date")["Value"].sum().reset_index()
-            chart2 = alt.Chart(val).mark_line().encode(
-                x="Date", y="Value"
+            st.altair_chart(
+                alt.Chart(val).mark_line().encode(x="Date", y="Value"),
+                use_container_width=True
             )
-            st.altair_chart(chart2, use_container_width=True)
     else:
         st.info("No history yet. Save snapshots to start tracking trends.")
 
@@ -455,4 +459,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v18.1 • Phase-8 normalized income (8w minus spikes) • all prior phases preserved")
+st.caption("v19.0 • Phase-9 underlying exposure stress added • all prior phases preserved")
