@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-import os, glob, json
+import os, json
 import streamlit.components.v1 as components
 import numpy as np
 import altair as alt
@@ -31,9 +31,7 @@ DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
-# =========================================================
-# ============== CLIENT STORAGE ===========================
-# =========================================================
+# ================= CLIENT STORAGE =================
 
 def load_from_browser():
     components.html("""
@@ -153,22 +151,58 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ====================================================
-# ================= PORTFOLIO ========================
-# ====================================================
+# ================= VALUE IMPACT =================
+
+st.markdown("### 💥 ETF Value Impact vs Income (per ETF)")
+
+impact = []
+
+for t in ETF_LIST:
+    hist = get_hist(t)
+    shares = st.session_state.holdings[t]["shares"]
+
+    if hist is not None and len(hist) > 25:
+        now = hist["Close"].iloc[-1]
+        d14 = hist["Close"].iloc[-10]
+        d28 = hist["Close"].iloc[-20]
+        chg14 = (now - d14) * shares
+        chg28 = (now - d28) * shares
+    else:
+        chg14 = chg28 = 0
+
+    weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
+
+    if chg14 >= 0 and chg28 >= 0:
+        sig = "🟢 HOLD"
+    elif weekly >= abs(chg28):
+        sig = "🟡 WATCH"
+    elif weekly >= abs(chg14):
+        sig = "🟡 WATCH"
+    else:
+        sig = "🔴 REDUCE"
+
+    impact.append({
+        "ETF": t,
+        "Weekly Income ($)": round(weekly, 2),
+        "Value Change 14d ($)": round(chg14, 2),
+        "Value Change 28d ($)": round(chg28, 2),
+        "Signal": sig
+    })
+
+st.dataframe(pd.DataFrame(impact), use_container_width=True)
+
+# ================= PORTFOLIO =================
 
 with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
         st.markdown(f"### 📈 {t}")
 
         c1, c2 = st.columns(2)
-
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
                 "Shares", min_value=0, step=1,
                 value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
             )
-
         with c2:
             st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
                 "Weekly Dividend per Share ($) — use , or .",
@@ -180,7 +214,6 @@ with st.expander("📁 Portfolio", expanded=True):
         st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
 
-    # ✅ CASH INPUT MOVED UP (FIX)
     st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
 
     total_value = df["Value"].sum() + safe_float(st.session_state.cash)
@@ -196,6 +229,50 @@ with st.expander("📁 Portfolio", expanded=True):
         st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
 
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
+
+# ================= SNAPSHOTS & ANALYSIS =================
+
+with st.expander("📤 Export & Snapshot Analysis", expanded=True):
+
+    if st.button("💾 Save Snapshot"):
+        path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        df.to_csv(path, index=False)
+        st.success("Snapshot saved")
+
+    files = sorted(os.listdir(SNAP_DIR))
+    if files:
+        snap = st.selectbox("📂 Compare with snapshot:", files)
+
+        snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
+
+        comp = df[["Ticker", "Value"]].merge(
+            snap_df[["Ticker", "Value"]],
+            on="Ticker",
+            suffixes=("_Now", "_Then")
+        )
+
+        comp["Change ($)"] = comp["Value_Now"] - comp["Value_Then"]
+
+        st.markdown("### 📊 ETF Value Comparison")
+        st.dataframe(comp, use_container_width=True)
+
+        hist_vals = []
+        for f in files:
+            d = pd.read_csv(os.path.join(SNAP_DIR, f))
+            hist_vals.append({
+                "Date": f.replace(".csv",""),
+                "Total Value": d["Value"].sum()
+            })
+
+        chart_df = pd.DataFrame(hist_vals)
+
+        chart = alt.Chart(chart_df).mark_line(point=True).encode(
+            x="Date",
+            y="Total Value"
+        )
+
+        st.markdown("### 📈 Portfolio Value Over Time")
+        st.altair_chart(chart, use_container_width=True)
 
 # ================= WARNINGS =================
 
@@ -238,14 +315,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-# ================= EXPORT =================
-
-with st.expander("📤 Export & History"):
-    if st.button("Save Snapshot"):
-        df.to_csv(os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M')}.csv"), index=False)
-        st.success("Saved")
-
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, "portfolio.csv", "text/csv")
-
-st.caption("v20.5 • Cash wallet included in portfolio value")
+st.caption("v20.7 • Snapshot history + comparison restored • Charts restored • Cash wallet fixed")
