@@ -347,15 +347,57 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
     else:
         st.success("Portfolio balance acceptable.")
 
-# ===================================================
-# ========== PHASE 8 — ETF INCOME OUTLOOK ===========
-# ===================================================
+===================================================
 
-with st.expander("🔮 Income Outlook (Phase 8)"):
+========== PHASE 8 — ETF INCOME OUTLOOK ============
+
+===================================================
+
+with st.expander("🔮 Income Outlook (Phase 8 — Normalized Next 4 Weeks)"):
+    st.caption("Uses last 8 payouts and removes top 2 spikes (typically year-end adjustments).")
+
+    @st.cache_data(ttl=900)
+    def get_normalized_weekly_div(ticker):
+        try:
+            divs = yf.Ticker(ticker).dividends
+
+            if divs is None or len(divs) < 6:
+                return None
+
+            last8 = divs.tail(8).values
+
+            if len(last8) < 6:
+                return None
+
+            # remove top 2 spikes
+            trimmed = sorted(last8)[:-2]
+
+            avg = float(np.mean(trimmed))
+            return round(avg, 4)
+
+        except:
+            return None
+
     for etf in ETF_LIST:
-        st.write(etf)
+        shares = st.session_state.holdings[etf]["shares"]
+        est_weekly = get_normalized_weekly_div(etf)
 
-# ===================================================
+        st.markdown(f"### {etf}")
+
+        if est_weekly is None:
+            st.caption("Dividend history unavailable or insufficient data.")
+            st.divider()
+            continue
+
+        est_4w = est_weekly * shares * 4
+
+        st.write(f"📌 Normalized weekly distribution: **${est_weekly}**")
+        st.write(f"📆 Projected next 4 weeks income: **${est_4w:,.2f}**")
+
+        if shares == 0:
+            st.info("Enter share amount in Portfolio to see income projection.")
+
+        st.divider() ===================================================
 # ================= EXPORT & HISTORY =================
 # ===================================================
 
