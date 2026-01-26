@@ -361,28 +361,47 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
         st.success("✅ Portfolio balance acceptable — no rebalance suggested.")
 
 # ===================================================
-# ========== PHASE 8 — ETF INCOME OUTLOOK =============
+# ========== PHASE 8 — ETF INCOME OUTLOOK (FIXED) ====
 # ===================================================
 
-with st.expander("🔮 Income Outlook (Phase 8 — Next 4 Weeks)"):
+with st.expander("🔮 Income Outlook (Phase 8 — Normalized Next 4 Weeks)"):
+
+    st.caption("Uses last 8 weekly payouts and removes top 2 year-end spike payments.")
+
+    @st.cache_data(ttl=900)
+    def get_normalized_weekly_div(ticker):
+        try:
+            divs = yf.Ticker(ticker).dividends.tail(8)
+
+            if len(divs) < 6:
+                return None
+
+            vals = sorted(divs.values)
+            trimmed = vals[:-2]   # remove top 2 spikes
+            avg = float(np.mean(trimmed))
+            return round(avg, 4)
+        except:
+            return None
 
     for etf in ETF_LIST:
         shares = st.session_state.holdings[etf]["shares"]
+        est_weekly = get_normalized_weekly_div(etf)
 
-        try:
-            divs = yf.Ticker(etf).dividends.tail(4)
-            if len(divs) > 0:
-                est_weekly = divs.mean()
-            else:
-                est_weekly = st.session_state.holdings[etf]["weekly_div"]
-        except:
-            est_weekly = st.session_state.holdings[etf]["weekly_div"]
+        st.markdown(f"### {etf}")
+
+        if est_weekly is None:
+            st.caption("Dividend history unavailable.")
+            st.divider()
+            continue
 
         est_4w = est_weekly * shares * 4
 
-        st.markdown(f"### {etf}")
-        st.write(f"Estimated weekly distribution: **${est_weekly:.4f}**")
-        st.write(f"Projected next 4 weeks income: **${est_4w:,.2f}**")
+        st.write(f"Estimated realistic weekly distribution: **${est_weekly}**")
+        st.write(f"Projected next 4 weeks income (based on holdings): **${est_4w:,.2f}**")
+
+        if shares == 0:
+            st.info("Set share amount in Portfolio to see income projection.")
+
         st.divider()
 
 # ===================================================
@@ -415,14 +434,14 @@ with st.expander("📤 Export & History"):
             st.subheader("📈 Monthly Income Trend")
             inc = hist_df.groupby("Date")["Monthly Income"].sum().reset_index()
             chart1 = alt.Chart(inc).mark_line().encode(
-                x="Date", y="Monthly Income", tooltip=[]
+                x="Date", y="Monthly Income"
             )
             st.altair_chart(chart1, use_container_width=True)
 
             st.subheader("📈 Portfolio Value Trend")
             val = hist_df.groupby("Date")["Value"].sum().reset_index()
             chart2 = alt.Chart(val).mark_line().encode(
-                x="Date", y="Value", tooltip=[]
+                x="Date", y="Value"
             )
             st.altair_chart(chart2, use_container_width=True)
     else:
@@ -436,4 +455,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v18.0 • popup fixed • Phase-8 ETF income outlook added • no existing logic removed")
+st.caption("v18.1 • Phase-8 normalized income (8w minus spikes) • all prior phases preserved")
