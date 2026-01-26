@@ -336,4 +336,4 @@ with st.expander("📤 Export & History"):
         mime="text/csv"
     )
 
-st.caption("v19.2 • Phase-10 Strategy Mode • all prior phases preserved")
+st.caption("v19.3 • Phase-10 Strategy Mode • ALL prior phases preserved")
