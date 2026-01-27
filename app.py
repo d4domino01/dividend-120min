@@ -359,3 +359,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
 st.caption("v21.2 • Clickable news links added • No features removed")
+ 
