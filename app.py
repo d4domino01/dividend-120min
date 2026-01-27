@@ -51,17 +51,16 @@ def get_price(ticker):
     try:
         return round(yf.Ticker(ticker).history(period="5d")["Close"].iloc[-1], 2)
     except:
-        return None
+        return 0.0
 
 # ---------------- BUILD LIVE DATA ----------------
 prices = {}
 for t in etf_list:
-    p = get_price(t)
-    prices[t] = p if p else 0.0
+    prices[t] = get_price(t)
 
 # ---------------- CALCULATIONS ----------------
 rows = []
-total_value = st.session_state.cash
+stock_value_total = 0.0
 total_weekly_income = 0.0
 
 impact_14d = {}
@@ -77,7 +76,7 @@ for t in etf_list:
     monthly_income = weekly_income * 52 / 12
     value = shares * price
 
-    total_value += value
+    stock_value_total += value
     total_weekly_income += weekly_income
 
     # price impact
@@ -108,8 +107,12 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
+# ---- TOTALS (NOW INCLUDE CASH) ----
+cash = float(st.session_state.cash)
+total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
+
 market_signal = "BUY"
 
 # ---------------- HEADER ----------------
@@ -128,7 +131,7 @@ with tabs[0]:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Total Value", f"${total_value:,.2f}")
+        st.metric("Total Value (incl. cash)", f"${total_value:,.2f}")
         st.metric("Annual Income", f"${annual_income:,.2f}")
     with col2:
         st.metric("Monthly Income", f"${monthly_income:,.2f}")
@@ -265,4 +268,4 @@ with tabs[3]:
     st.subheader("📸 Snapshots")
     st.info("Snapshot history + backtesting will be restored next.")
 
-st.caption("v3.1 • Portfolio drives dashboard • Live prices • Manual dividend control")
+st.caption("v3.2 • Cash wallet included in all totals • Portfolio fully synced")
