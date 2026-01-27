@@ -253,9 +253,13 @@ with tabs[2]:
         st.divider()
 
     st.subheader("💰 Cash Wallet")
-    st.session_state.cash = st.number_input(
-        "Cash ($)", min_value=0.0, step=50.0,
-        value=float(st.session_state.cash)
+
+    # ✅ FIXED — no more double-enter needed
+    st.number_input(
+        "Cash ($)",
+        min_value=0.0,
+        step=50.0,
+        key="cash"
     )
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
@@ -268,4 +272,4 @@ with tabs[3]:
     st.subheader("📸 Snapshots")
     st.info("Snapshot history + backtesting will be restored next.")
 
-st.caption("v3.2 • Cash wallet included in all totals • Portfolio fully synced")
+st.caption("v3.2.1 • Wallet input fixed • No other changes")
