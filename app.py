@@ -158,13 +158,22 @@ tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📤 Snapshots
 
 with tabs[0]:
 
-    st.markdown("#### Overview", unsafe_allow_html=False)
+    st.subheader("Overview")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Value", f"${total_value:,.0f}")
-    c2.metric("Monthly Income", f"${total_monthly:,.0f}")
-    c3.metric("Annual Income", f"${total_annual:,.0f}")
-    c4.metric("Market", market)
+c1, c2 = st.columns(2)
+c3, c4 = st.columns(2)
+
+with c1:
+    st.metric("Total Value", f"${total_value:,.0f}")
+
+with c2:
+    st.metric("Monthly Income", f"${total_monthly:,.0f}")
+
+with c3:
+    st.metric("Annual Income", f"${total_annual:,.0f}")
+
+with c4:
+    st.metric("Market", market)
 
     st.divider()
     st.subheader("💥 ETF Signals")
