@@ -306,7 +306,7 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
         chart = alt.Chart(chart_df).mark_line(point=True).encode(
             x="Date",
-            y=alt.Y("Total Value", scale=alt.Scale(domain=[10000, 12000]))
+            y=alt.Y("Total Value", scale=alt.Scale(domain=[10500, 11500]))
         )
 
         st.markdown("##### 📈 Portfolio Value Over Time (Zoomed)")
