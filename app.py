@@ -4,6 +4,7 @@ import feedparser
 import yfinance as yf
 import os
 from datetime import datetime
+import numpy as np
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -11,7 +12,7 @@ st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
-# ---------------- SNAPSHOT DIR (V2 — ISOLATED) ----------------
+# ---------------- SNAPSHOT DIR (V2) ----------------
 SNAP_DIR = "snapshots_v2"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
@@ -59,6 +60,13 @@ def get_price(ticker):
     except:
         return 0.0
 
+@st.cache_data(ttl=600)
+def get_hist(ticker):
+    try:
+        return yf.Ticker(ticker).history(period="30d")
+    except:
+        return None
+
 # ---------------- BUILD LIVE DATA ----------------
 prices = {t: get_price(t) for t in etf_list}
 
@@ -84,8 +92,8 @@ for t in etf_list:
     total_weekly_income += weekly_income
 
     try:
-        hist = yf.Ticker(t).history(period="30d")
-        if len(hist) > 20:
+        hist = get_hist(t)
+        if hist is not None and len(hist) > 20:
             now = hist["Close"].iloc[-1]
             d14 = hist["Close"].iloc[-10]
             d28 = hist["Close"].iloc[-20]
@@ -120,7 +128,7 @@ market_signal = "BUY"
 st.title("📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
-tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
+tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots", "🎯 Strategy"])
 
 # ============================================================
 # ======================= DASHBOARD ==========================
@@ -186,11 +194,9 @@ with tabs[0]:
 # ============================================================
 
 with tabs[1]:
-
     st.subheader("📰 ETF • Market • Stock News")
 
     for tkr in etf_list:
-
         st.markdown(f"### 🔹 {tkr}")
 
         st.markdown("**ETF / Strategy News**")
@@ -216,7 +222,6 @@ with tabs[2]:
     st.subheader("📁 Portfolio Control Panel")
 
     for t in etf_list:
-
         st.markdown(f"### {t}")
 
         c1, c2, c3 = st.columns(3)
@@ -240,7 +245,6 @@ with tabs[2]:
         st.caption(
             f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
         )
-
         st.divider()
 
     st.subheader("💰 Cash Wallet")
@@ -257,7 +261,7 @@ with tabs[2]:
 
 with tabs[3]:
 
-    st.subheader("📸 Portfolio Snapshot Analysis (All History)")
+    st.subheader("📸 Portfolio Value Snapshots")
 
     colA, colB = st.columns(2)
 
@@ -291,48 +295,24 @@ with tabs[3]:
         st.info("No snapshots yet. Save at least one to begin tracking.")
 
     else:
-
         hist_df = pd.concat(all_snaps)
 
-        # ---- TOTAL VALUE OVER TIME ----
         totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
-        st.subheader("📈 Total Portfolio Value Over Time")
         st.line_chart(totals.set_index("Snapshot")["Total"])
 
-        # ---- PER ETF VALUE LINES ----
-        st.subheader("📉 ETF Value Trends")
-
-        etf_trend = hist_df.pivot_table(
-            index="Snapshot",
-            columns="Ticker",
-            values="Value ($)",
-            aggfunc="max"
-        )
-
-        st.line_chart(etf_trend)
-
-        # ---- INCOME GROWTH ----
-        st.subheader("💸 Weekly Income Over Time")
-
-        income_trend = hist_df.groupby("Snapshot")["Weekly Income ($)"].sum()
-        st.line_chart(income_trend)
-
-        # ---- ETF PERFORMANCE SUMMARY ----
-        st.subheader("📊 ETF Performance Summary (All Snapshots)")
+        st.subheader("📊 ETF Performance Across Snapshots")
 
         etf_stats = []
-
         for t in etf_list:
             vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
-
-            if len(vals) >= 1:
+            if len(vals) >= 2:
                 etf_stats.append({
                     "Ticker": t,
-                    "Start ($)": round(vals.iloc[0], 2),
-                    "Latest ($)": round(vals.iloc[-1], 2),
-                    "Net ($)": round(vals.iloc[-1] - vals.iloc[0], 2),
-                    "Best ($)": round(vals.max(), 2),
-                    "Worst ($)": round(vals.min(), 2),
+                    "Start ($)": vals.iloc[0],
+                    "Latest ($)": vals.iloc[-1],
+                    "Net ($)": vals.iloc[-1] - vals.iloc[0],
+                    "Best ($)": vals.max(),
+                    "Worst ($)": vals.min(),
                 })
 
         stats_df = pd.DataFrame(etf_stats)
@@ -343,7 +323,84 @@ with tabs[3]:
             .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
             .format("${:,.2f}", subset=[c for c in stats_df.columns if c != "Ticker"])
         )
-
         st.dataframe(styled_stats, use_container_width=True)
 
-st.caption("v3.9 • Full snapshot history analysis • All trends enabled • Other tabs untouched")
+# ============================================================
+# ===================== STRATEGY TAB =========================
+# ============================================================
+
+with tabs[4]:
+
+    st.subheader("🎯 Strategy Engine (Snapshot + Live Data)")
+
+    # ----- LOAD SNAPSHOT TRENDS -----
+    snap_growth = {}
+
+    if all_snaps:
+        hist_df = pd.concat(all_snaps)
+        for t in etf_list:
+            vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
+            if len(vals) >= 2:
+                snap_growth[t] = (vals.iloc[-1] - vals.iloc[0]) / max(vals.iloc[0], 1)
+            else:
+                snap_growth[t] = 0
+    else:
+        snap_growth = {t: 0 for t in etf_list}
+
+    # ----- SCORE ETFs -----
+    scores = []
+
+    for t in etf_list:
+        weekly = df[df.Ticker == t]["Weekly Income ($)"].iloc[0]
+        trend = snap_growth.get(t, 0)
+        momentum = impact_14d[t] + impact_28d[t]
+
+        score = weekly * 2 + trend * 100 + momentum * 0.1
+
+        scores.append({
+            "ETF": t,
+            "Score": round(score, 2),
+            "Weekly ($)": weekly,
+            "Trend": "Up" if trend >= 0 else "Down"
+        })
+
+    score_df = pd.DataFrame(scores).sort_values("Score", ascending=False)
+
+    st.markdown("### 🥇 Auto-Ranked ETFs")
+    st.dataframe(score_df, use_container_width=True)
+
+    # ----- NEXT INVESTMENT -----
+    invest_amt = 200
+
+    best = score_df.iloc[0]["ETF"]
+    price = prices[best]
+    shares = int(invest_amt // price)
+    extra_weekly = shares * st.session_state.holdings[best]["div"]
+
+    st.markdown("### 💶 Where to Put Your Next €200")
+    st.success(f"Buy **{shares} shares of {best}** (≈ ${shares*price:.2f}) → +${extra_weekly:.2f}/week")
+
+    # ----- RISK FLAGS -----
+    st.markdown("### 🚨 Dividend Risk Monitor")
+
+    for t in etf_list:
+        trend = snap_growth.get(t, 0)
+        if trend < -0.05:
+            st.error(f"{t}: Portfolio value trending down — watch income sustainability")
+        elif trend < 0:
+            st.warning(f"{t}: Slight decline trend — monitor")
+        else:
+            st.success(f"{t}: Stable")
+
+    # ----- REBALANCE -----
+    st.markdown("### 🔁 Rebalance Suggestions")
+
+    largest = df.sort_values("Value ($)", ascending=False).iloc[0]["Ticker"]
+    worst = score_df.sort_values("Score").iloc[0]["ETF"]
+
+    if largest != worst:
+        st.warning(f"Consider trimming **{largest}** and adding to **{score_df.iloc[0]['ETF']}**")
+    else:
+        st.success("Portfolio allocation looks balanced")
+
+st.caption("v4.0 • Strategy engine added • Snapshot trends enabled • Other tabs untouched")
