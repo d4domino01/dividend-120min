@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import feedparser
 import yfinance as yf
-from datetime import datetime
 import os
+from datetime import datetime
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -11,7 +11,7 @@ st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
-# ---------------- PATHS ----------------
+# ---------------- SNAPSHOT DIR ----------------
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
@@ -110,7 +110,6 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
-# ---- TOTALS ----
 cash = float(st.session_state.cash)
 total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
@@ -141,7 +140,7 @@ with tabs[0]:
 
     st.divider()
 
-    table_only = st.toggle("Table only view", value=False)
+    show_table_only = st.toggle("📋 Table only view")
 
     dash_rows = []
     for _, r in df.iterrows():
@@ -155,7 +154,7 @@ with tabs[0]:
 
     dash_df = pd.DataFrame(dash_rows)
 
-    if not table_only:
+    if not show_table_only:
         for _, row in dash_df.iterrows():
             c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
             c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
@@ -173,8 +172,7 @@ with tabs[0]:
     styled = (
         dash_df
         .style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444" if v < 0 else "",
-                  subset=["14d ($)", "28d ($)"])
+        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
         .format({
             "Weekly ($)": "${:,.2f}",
             "14d ($)": "{:+,.2f}",
@@ -192,6 +190,7 @@ with tabs[1]:
     st.subheader("📰 ETF • Market • Stock News")
 
     for tkr in etf_list:
+
         st.markdown(f"### 🔹 {tkr}")
 
         st.markdown("**ETF / Strategy News**")
@@ -247,7 +246,7 @@ with tabs[2]:
     st.subheader("💰 Cash Wallet")
     st.session_state.cash = st.number_input(
         "Cash ($)", min_value=0.0, step=50.0,
-        value=float(st.session_state.cash), key="cash_wallet"
+        value=float(st.session_state.cash)
     )
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
@@ -288,23 +287,30 @@ with tabs[3]:
         except:
             pass
 
-    if all_snaps:
+    if not all_snaps:
+        st.info("No snapshots yet. Save at least one to begin tracking.")
+
+    else:
 
         hist_df = pd.concat(all_snaps)
 
-        # -------- Portfolio total over time --------
         totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
         st.line_chart(totals.set_index("Snapshot")["Total"])
 
-        # -------- ETF Historical Analysis --------
-        st.subheader("📊 ETF Performance Across ALL Snapshots")
+        st.subheader("📊 ETF Performance Across Snapshots")
 
         etf_stats = []
 
         for t in etf_list:
             vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
 
-            if len(vals) >= 2:
+            if len(vals) == 1:
+                etf_stats.append({
+                    "Ticker": t,
+                    "Current ($)": round(vals.iloc[0], 2)
+                })
+
+            elif len(vals) >= 2:
                 etf_stats.append({
                     "Ticker": t,
                     "Start ($)": round(vals.iloc[0], 2),
@@ -316,17 +322,15 @@ with tabs[3]:
 
         stats_df = pd.DataFrame(etf_stats)
 
-        styled_stats = (
-            stats_df
-            .style
-            .applymap(lambda v: "color:#22c55e" if isinstance(v, (int,float)) and v > 0 else "color:#ef4444",
-                      subset=["Net ($)"])
-            .format("${:,.2f}", subset=["Start ($)", "Latest ($)", "Net ($)", "Best ($)", "Worst ($)"])
-        )
+        if "Net ($)" in stats_df.columns:
+            styled_stats = (
+                stats_df
+                .style
+                .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
+                .format("${:,.2f}", subset=[c for c in stats_df.columns if c != "Ticker"])
+            )
+            st.dataframe(styled_stats, use_container_width=True)
+        else:
+            st.dataframe(stats_df, use_container_width=True)
 
-        st.dataframe(styled_stats, use_container_width=True)
-
-    else:
-        st.info("No snapshots yet. Save at least one to begin analysis.")
-
-st.caption("v3.7 • Full snapshot history ETF analysis enabled • Stable wallet + dashboard")
+st.caption("v3.7 • Snapshot system stable • Dashboard preserved • No KeyErrors")
