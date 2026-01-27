@@ -163,19 +163,26 @@ with tabs[0]:
 
     if view_mode == "📈 Chart View":
 
-        chart_df = dash_df.melt(id_vars="Ticker", value_vars=["14d", "28d"],
-                                 var_name="Period", value_name="Impact")
+        chart_df = dash_df.melt(
+            id_vars="Ticker",
+            value_vars=["14d", "28d"],
+            var_name="Period",
+            value_name="Impact"
+        )
 
-        chart = alt.Chart(chart_df).mark_bar().encode(
-            x="Ticker",
-            y="Impact",
-            color=alt.condition(
-                alt.datum.Impact > 0,
-                alt.value("#22c55e"),
-                alt.value("#ef4444")
-            ),
-            column="Period"
-        ).properties(height=250)
+        chart = (
+            alt.Chart(chart_df)
+            .mark_line(point=True)
+            .encode(
+                x="Ticker:N",
+                y=alt.Y("Impact:Q", title="Value Change ($)"),
+                color=alt.Color(
+                    "Period:N",
+                    scale=alt.Scale(domain=["14d", "28d"], range=["#22c55e", "#60a5fa"])
+                ),
+            )
+            .properties(height=300)
+        )
 
         st.altair_chart(chart, use_container_width=True)
 
@@ -276,4 +283,4 @@ with tabs[3]:
     else:
         st.info("No snapshots yet.")
 
-st.caption("v3.7 • Dashboard chart/cards toggle restored • No other sections changed")
+st.caption("v3.8 • Line chart restored • Cards toggle preserved • All other tabs unchanged")
