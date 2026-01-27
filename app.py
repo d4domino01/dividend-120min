@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-import os, json
-import streamlit.components.v1 as components
+import os
 import numpy as np
 import altair as alt
 import feedparser
@@ -43,8 +42,6 @@ tab_dash, tab_news, tab_port, tab_snap, tab_strat = st.tabs(
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
-UNDERLYING_MAP = {"QDTE": "QQQ", "XDTE": "SPY", "CHPY": "SOXX"}
-
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
     "CHPY": "https://news.google.com/rss/search?q=semiconductor+industry+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -60,7 +57,7 @@ if "holdings" not in st.session_state:
     st.session_state.holdings = {t: {"shares": DEFAULT_SHARES[t], "weekly_div_ps": ""} for t in ETF_LIST}
 
 if "cash" not in st.session_state:
-    st.session_state.cash = ""
+    st.session_state.cash = 0.0
 
 # ================= DATA FETCH =================
 
@@ -133,20 +130,24 @@ df = pd.DataFrame(rows)
 
 with tab_dash:
 
-    total_value = df["Value"].sum() + safe_float(st.session_state.cash)
+    total_value = df["Value"].sum() + float(st.session_state.cash)
     total_annual = df["Weekly"].sum() * 52
     total_monthly = total_annual / 12
 
     down = (df["Trend"] == "Down").sum()
     market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
-    mcolor = "green" if market == "BUY" else "orange" if market == "HOLD" else "red"
 
     st.markdown("#### Overview")
     st.metric("Total Value", money(total_value))
     st.metric("Monthly Income", money(total_monthly))
     st.metric("Annual Income", money(total_annual))
 
-    st.markdown(f"**Market:** 🟢 **{market}**" if market=="BUY" else f"**Market:** {market}")
+    if market == "BUY":
+        st.markdown("**Market:** 🟢 **BUY**")
+    elif market == "HOLD":
+        st.markdown("**Market:** 🟡 **HOLD**")
+    else:
+        st.markdown("**Market:** 🔴 **DEFENSIVE**")
 
     st.divider()
     st.markdown("#### 💥 ETF Value Impact vs Income")
@@ -166,7 +167,7 @@ with tab_dash:
 
         impact.append({
             "ETF": t,
-            "Weekly Income ($)": round(df[df.Ticker == t]["Weekly"].iloc[0],2),
+            "Weekly Income ($)": round(df[df.Ticker == t]["Weekly"].iloc[0], 2),
             "Value Change 14d ($)": chg14,
             "Value Change 28d ($)": chg28
         })
@@ -177,7 +178,7 @@ with tab_dash:
         return f"color:{'green' if val>=0 else 'red'}"
 
     styled = impact_df.style.applymap(color_gain, subset=["Value Change 14d ($)", "Value Change 28d ($)"])\
-                            .format({"Weekly Income ($)": "{:.2f}", "Value Change 14d ($)": "{:.2f}", "Value Change 28d ($)": "{:.2f}"})
+                            .format("{:.2f}")
 
     st.dataframe(styled, use_container_width=True)
 
@@ -190,7 +191,7 @@ with tab_news:
             st.markdown(f"• [{n.title}]({n.link})")
         st.divider()
 
-# ================= PORTFOLIO (LIVE SUMMARY ADDED) =================
+# ================= PORTFOLIO =================
 
 with tab_port:
 
@@ -219,7 +220,10 @@ with tab_port:
 
         st.divider()
 
-    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
+    # ✅ FIXED WALLET — LIVE UPDATE
+    st.session_state.cash = st.number_input(
+        "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=float(st.session_state.cash)
+    )
 
 # ================= SNAPSHOTS =================
 
@@ -277,4 +281,4 @@ with tab_strat:
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly {money(r.Monthly)}")
 
-st.caption("v36 • Live per-ETF portfolio summary • Color-coded ETF impact • All features preserved")
+st.caption("v37 • Wallet live update • All features preserved")
