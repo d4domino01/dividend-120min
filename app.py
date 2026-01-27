@@ -21,8 +21,8 @@ def safe_float(x):
 # ================= PAGE =================
 
 st.markdown(
-    "<div style='font-size:18px; font-weight:700;'>📈 Income Strategy Engine</div>"
-    "<div style='font-size:11px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
+    "<div style='font-size:20px; font-weight:700;'>📈 Income Strategy Engine</div>"
+    "<div style='font-size:12px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
     unsafe_allow_html=True
 )
 
@@ -167,10 +167,7 @@ df = pd.DataFrame(rows)
 down = (df["Trend"] == "Down").sum()
 market = "🟢 BUY" if down == 0 else "🟡 HOLD" if down == 1 else "🔴 DEFENSIVE"
 
-st.markdown(
-    f"<div style='padding:6px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>",
-    unsafe_allow_html=True
-)
+st.markdown(f"#### 🌍 Market: {market}")
 
 # ================= VALUE IMPACT =================
 
@@ -204,52 +201,35 @@ for t in ETF_LIST:
 
     impact.append({
         "ETF": t,
-        "Weekly Income ($)": weekly,
-        "Value Change 14d ($)": chg14,
-        "Value Change 28d ($)": chg28,
+        "Weekly Income ($)": round(weekly, 2),
+        "Value Change 14d ($)": round(chg14, 2),
+        "Value Change 28d ($)": round(chg28, 2),
         "Signal": sig
     })
 
-impact_df = pd.DataFrame(impact)
-
-def color_change(val):
-    if isinstance(val, (int, float)):
-        if val > 0:
-            return "color: #2ecc71; font-weight:600"  # green
-        elif val < 0:
-            return "color: #e74c3c; font-weight:600"  # red
-    return ""
-
-styled = (
-    impact_df.style
-    .format({
-        "Weekly Income ($)": "${:.2f}",
-        "Value Change 14d ($)": "${:.2f}",
-        "Value Change 28d ($)": "${:.2f}",
-    })
-    .applymap(color_change, subset=["Value Change 14d ($)", "Value Change 28d ($)"])
-)
-
-st.dataframe(styled, use_container_width=True)
+st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
 # ================= NEWS =================
 
-with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
+with st.expander("#### 📰 Market & Sector News (Relevant to Each ETF)"):
     for t in ETF_LIST:
-        st.markdown(f"#### 📌 {t} — Market News")
+        st.markdown(f"**{t}**")
         entries = get_rss(RSS_MAP.get(t, ""))
         if entries:
             for n in entries:
-                st.markdown(f"• [{n.title}]({n.link})")
+                title = n.get("title", "Open article")
+                link = n.get("link", "")
+                if link:
+                    st.markdown(f"• [{title}]({link})")
         else:
-            st.info("No news feed available right now.")
+            st.info("No news available.")
         st.divider()
 
 # ================= PORTFOLIO =================
 
-with st.expander("📁 Portfolio", expanded=True):
+with st.expander("#### 📁 Portfolio", expanded=True):
     for t in ETF_LIST:
-        st.markdown(f"#### 📈 {t}")
+        st.markdown(f"**{t}**")
 
         c1, c2 = st.columns(2)
         with c1:
@@ -259,7 +239,7 @@ with st.expander("📁 Portfolio", expanded=True):
             )
         with c2:
             st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
-                "Weekly Dividend per Share ($) — use , or .",
+                "Weekly Dividend per Share ($)",
                 value=str(st.session_state.holdings[t]["weekly_div_ps"]), key=f"dps_{t}"
             )
 
@@ -275,18 +255,15 @@ with st.expander("📁 Portfolio", expanded=True):
     total_monthly_income = total_annual_income / 12
 
     c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
-    with c2:
-        st.metric("💸 Annual Income", f"${total_annual_income:,.2f}")
-    with c3:
-        st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
+    c1.metric("Portfolio Value", f"${total_value:,.2f}")
+    c2.metric("Annual Income", f"${total_annual_income:,.2f}")
+    c3.metric("Monthly Income", f"${total_monthly_income:,.2f}")
 
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ================= SNAPSHOTS =================
 
-with st.expander("📤 Export & Snapshot Analysis", expanded=True):
+with st.expander("#### 📤 Export & Snapshot Analysis", expanded=True):
 
     if st.button("💾 Save Snapshot"):
         path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
@@ -295,7 +272,7 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
     files = sorted(os.listdir(SNAP_DIR))
     if files:
-        snap = st.selectbox("📂 Compare with snapshot:", files)
+        snap = st.selectbox("Compare with snapshot:", files)
 
         snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
 
@@ -330,7 +307,7 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
 # ================= WARNINGS =================
 
-with st.expander("🚨 Warnings & Risk"):
+with st.expander("#### 🚨 Warnings & Risk"):
     for _, r in df.iterrows():
         if r["Trend"] == "Down":
             st.warning(f"{r.Ticker} in downtrend")
@@ -339,7 +316,7 @@ with st.expander("🚨 Warnings & Risk"):
 
 # ================= MARKET STRESS =================
 
-with st.expander("📉 Market Stress & Early Warnings"):
+with st.expander("#### 📉 Market Stress & Early Warnings"):
     for t in ETF_LIST:
         hist = get_hist(t, 10)
         if hist is not None and len(hist) > 1:
@@ -348,14 +325,14 @@ with st.expander("📉 Market Stress & Early Warnings"):
 
 # ================= OPTIMIZER =================
 
-with st.expander("🎯 Allocation Optimizer (Phase 6)"):
+with st.expander("#### 🎯 Allocation Optimizer (Phase 6)"):
     ranked = df.sort_values("Trend", ascending=False)
     for _, r in ranked.iterrows():
         st.write(f"{r.Ticker} | Trend: {r.Trend}")
 
 # ================= REBALANCE =================
 
-with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
+with st.expander("#### 🔄 Rebalance Suggestions (Phase 7)"):
     strongest = df[df.Trend == "Up"]
     weakest = df[df.Trend == "Down"]
     if len(strongest) > 0 and len(weakest) > 0:
@@ -365,8 +342,8 @@ with st.expander("🔄 Rebalance Suggestions (Phase 7)"):
 
 # ================= INCOME OUTLOOK =================
 
-with st.expander("🔮 Income Outlook (Phase 8)"):
+with st.expander("#### 🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v21.3 • UI polish only • No sections removed • Logic untouched")
+st.caption("v22 • UI polish only (smaller headers) • No features removed")
