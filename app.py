@@ -12,7 +12,7 @@ st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
 # ---------------- SNAPSHOT DIR (V2 — ISOLATED) ----------------
-SNAP_DIR = "snapshots_v2"   # <<< NEW FOLDER — OLD snapshots/ IGNORED
+SNAP_DIR = "snapshots_v2"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ---------------- DEFAULT SESSION ----------------
@@ -257,14 +257,14 @@ with tabs[2]:
 
 with tabs[3]:
 
-    st.subheader("📸 Portfolio Value Snapshots (v2)")
+    st.subheader("📸 Portfolio Snapshot Analysis (All History)")
 
     colA, colB = st.columns(2)
 
     with colA:
         if st.button("💾 Save Snapshot"):
             ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            snap = df[["Ticker", "Value ($)"]].copy()
+            snap = df[["Ticker", "Value ($)", "Weekly Income ($)"]].copy()
             snap["Cash"] = cash
             snap["Total"] = total_value
             snap.to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
@@ -294,23 +294,38 @@ with tabs[3]:
 
         hist_df = pd.concat(all_snaps)
 
+        # ---- TOTAL VALUE OVER TIME ----
         totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
+        st.subheader("📈 Total Portfolio Value Over Time")
         st.line_chart(totals.set_index("Snapshot")["Total"])
 
-        st.subheader("📊 ETF Performance Across Snapshots")
+        # ---- PER ETF VALUE LINES ----
+        st.subheader("📉 ETF Value Trends")
+
+        etf_trend = hist_df.pivot_table(
+            index="Snapshot",
+            columns="Ticker",
+            values="Value ($)",
+            aggfunc="max"
+        )
+
+        st.line_chart(etf_trend)
+
+        # ---- INCOME GROWTH ----
+        st.subheader("💸 Weekly Income Over Time")
+
+        income_trend = hist_df.groupby("Snapshot")["Weekly Income ($)"].sum()
+        st.line_chart(income_trend)
+
+        # ---- ETF PERFORMANCE SUMMARY ----
+        st.subheader("📊 ETF Performance Summary (All Snapshots)")
 
         etf_stats = []
 
         for t in etf_list:
             vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
 
-            if len(vals) == 1:
-                etf_stats.append({
-                    "Ticker": t,
-                    "Current ($)": round(vals.iloc[0], 2)
-                })
-
-            elif len(vals) >= 2:
+            if len(vals) >= 1:
                 etf_stats.append({
                     "Ticker": t,
                     "Start ($)": round(vals.iloc[0], 2),
@@ -322,15 +337,13 @@ with tabs[3]:
 
         stats_df = pd.DataFrame(etf_stats)
 
-        if "Net ($)" in stats_df.columns:
-            styled_stats = (
-                stats_df
-                .style
-                .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
-                .format("${:,.2f}", subset=[c for c in stats_df.columns if c != "Ticker"])
-            )
-            st.dataframe(styled_stats, use_container_width=True)
-        else:
-            st.dataframe(stats_df, use_container_width=True)
+        styled_stats = (
+            stats_df
+            .style
+            .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
+            .format("${:,.2f}", subset=[c for c in stats_df.columns if c != "Ticker"])
+        )
 
-st.caption("v3.8 • Snapshot v2 isolated • Old snapshot folder ignored • UI preserved")
+        st.dataframe(styled_stats, use_container_width=True)
+
+st.caption("v3.9 • Full snapshot history analysis • All trends enabled • Other tabs untouched")
