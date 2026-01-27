@@ -212,14 +212,25 @@ for t in ETF_LIST:
 
 impact_df = pd.DataFrame(impact)
 
-st.dataframe(
-    impact_df.style.format({
+def color_change(val):
+    if isinstance(val, (int, float)):
+        if val > 0:
+            return "color: #2ecc71; font-weight:600"  # green
+        elif val < 0:
+            return "color: #e74c3c; font-weight:600"  # red
+    return ""
+
+styled = (
+    impact_df.style
+    .format({
         "Weekly Income ($)": "${:.2f}",
         "Value Change 14d ($)": "${:.2f}",
         "Value Change 28d ($)": "${:.2f}",
-    }),
-    use_container_width=True
+    })
+    .applymap(color_change, subset=["Value Change 14d ($)", "Value Change 28d ($)"])
 )
+
+st.dataframe(styled, use_container_width=True)
 
 # ================= NEWS =================
 
