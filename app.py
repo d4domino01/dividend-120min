@@ -18,18 +18,22 @@ def safe_float(x):
     except:
         return 0.0
 
-# ================= PAGE =================
+# ================= PAGE & STYLE =================
 
 st.markdown("""
 <style>
-.card {background:#111;padding:14px;border-radius:14px;margin-bottom:10px;}
-.kpi {background:#161616;padding:14px;border-radius:14px;text-align:center;}
+.card {background:#111;padding:12px;border-radius:14px;margin-bottom:10px;}
+.kpi {background:#161616;padding:10px;border-radius:14px;text-align:center;margin-bottom:6px;}
 .kpi h2{margin:0;font-size:22px;}
 .kpi p{margin:0;opacity:.7;font-size:12px;}
 
-.signal-hold{background:#1f3d2b;color:#7CFFB2;padding:6px 12px;border-radius:20px;display:inline-block;}
-.signal-watch{background:#3d341f;color:#FFD36E;padding:6px 12px;border-radius:20px;display:inline-block;}
-.signal-reduce{background:#3d1f1f;color:#FF7C7C;padding:6px 12px;border-radius:20px;display:inline-block;}
+.signal-hold{color:#7CFFB2;font-weight:600;}
+.signal-watch{color:#FFD36E;font-weight:600;}
+.signal-reduce{color:#FF7C7C;font-weight:600;}
+
+.dot-hold{height:12px;width:12px;background:#2ecc71;border-radius:50%;display:inline-block;margin-right:8px;}
+.dot-watch{height:12px;width:12px;background:#f1c40f;border-radius:50%;display:inline-block;margin-right:8px;}
+.dot-reduce{height:12px;width:12px;background:#e74c3c;border-radius:50%;display:inline-block;margin-right:8px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,6 +42,8 @@ st.markdown(
     "<div style='font-size:13px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
     unsafe_allow_html=True
 )
+
+# ================= CONFIG =================
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
@@ -52,7 +58,7 @@ RSS_MAP = {
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
-# ================= STORAGE =================
+# ================= CLIENT STORAGE =================
 
 def load_from_browser():
     components.html("""
@@ -187,18 +193,18 @@ with tab1:
         weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
 
         if chg14 >= 0 and chg28 >= 0:
-            sig = "HOLD"; cls="signal-hold"
+            sig = "BUY / HOLD"; cls="signal-hold"; dot="dot-hold"
         elif weekly >= abs(chg28) or weekly >= abs(chg14):
-            sig = "WATCH"; cls="signal-watch"
+            sig = "WATCH"; cls="signal-watch"; dot="dot-watch"
         else:
-            sig = "REDUCE"; cls="signal-reduce"
+            sig = "REDUCE"; cls="signal-reduce"; dot="dot-reduce"
 
         st.markdown(f"""
         <div class='card'>
         <b>{t}</b><br>
         Weekly Income: ${weekly:.2f}<br>
         14d Impact: ${chg14:.2f} | 28d Impact: ${chg28:.2f}<br><br>
-        <span class='{cls}'>{sig}</span>
+        <span class='{dot}'></span><span class='{cls}'>{sig}</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -255,4 +261,4 @@ with tab5:
     for _, r in ranked.iterrows():
         st.write(f"{r.Ticker} | Trend {r.Trend}")
 
-st.caption("v23.0 • KPI grid • ETF signal cards • Tabs • No features removed")
+st.caption("v23.1 • KPI 2x2 grid • Signal dots • ETF cards • Tabs • No features removed")
