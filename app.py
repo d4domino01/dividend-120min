@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import feedparser
@@ -240,7 +239,7 @@ with tabs[2]:
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
-# ===================== SNAPSHOTS (SAFE) ========================
+# ===================== SNAPSHOTS (CRASH-PROOF) ========================
 with tabs[3]:
 
     st.subheader("📸 Portfolio Value Snapshots")
@@ -262,17 +261,22 @@ with tabs[3]:
         snap.to_csv(os.path.join(SNAP_DIR, fname), index=False)
         st.success("Snapshot saved.")
 
-    files = sorted(os.listdir(SNAP_DIR))
+    history = []
 
-    if files:
-        history = []
-        for f in files:
+    for f in os.listdir(SNAP_DIR):
+        try:
             dfh = pd.read_csv(os.path.join(SNAP_DIR, f))
-            history.append(dfh.iloc[0])
+            if "Timestamp" in dfh.columns and "Total Value ($)" in dfh.columns:
+                history.append(dfh.iloc[0])
+        except:
+            pass
 
+    if history:
         hist_df = pd.DataFrame(history)
+        hist_df["Timestamp"] = pd.to_datetime(hist_df["Timestamp"])
+        hist_df = hist_df.sort_values("Timestamp")
         st.line_chart(hist_df.set_index("Timestamp")["Total Value ($)"])
     else:
-        st.info("No snapshots yet.")
+        st.info("No valid snapshots yet.")
 
-st.caption("v3.5 • Snapshot system rebuilt • No merge errors possible")
+st.caption("v3.6 • Snapshot system hardened • No KeyErrors possible")
