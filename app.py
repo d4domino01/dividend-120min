@@ -11,7 +11,7 @@ st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
-# ---------------- SNAPSHOT DIR (V2 ONLY) ----------------
+# ---------------- SNAPSHOT DIR (V2) ----------------
 SNAP_DIR = "snapshots_v2"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
@@ -59,13 +59,6 @@ def get_price(ticker):
     except:
         return 0.0
 
-@st.cache_data(ttl=600)
-def get_hist(ticker):
-    try:
-        return yf.Ticker(ticker).history(period="30d")
-    except:
-        return None
-
 # ---------------- BUILD LIVE DATA ----------------
 prices = {t: get_price(t) for t in etf_list}
 
@@ -91,8 +84,8 @@ for t in etf_list:
     total_weekly_income += weekly_income
 
     try:
-        hist = get_hist(t)
-        if hist is not None and len(hist) > 20:
+        hist = yf.Ticker(t).history(period="30d")
+        if len(hist) > 20:
             now = hist["Close"].iloc[-1]
             d14 = hist["Close"].iloc[-10]
             d28 = hist["Close"].iloc[-20]
@@ -109,6 +102,7 @@ for t in etf_list:
         "Ticker": t,
         "Shares": shares,
         "Price ($)": price,
+        "Div / Share ($)": div,
         "Weekly Income ($)": round(weekly_income, 2),
         "Monthly Income ($)": round(monthly_income, 2),
         "Value ($)": round(value, 2),
@@ -121,16 +115,16 @@ total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
 
-# ---------------- HEADER ----------------
+# ============================================================
+# ============================ UI ============================
+# ============================================================
+
 st.title("📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
-tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
+tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# ============================================================
 # ======================= DASHBOARD ==========================
-# ============================================================
-
 with tabs[0]:
 
     st.subheader("📊 Overview")
@@ -174,16 +168,80 @@ with tabs[0]:
             </div>
             """, unsafe_allow_html=True)
 
-    st.dataframe(dash_df, use_container_width=True)
+    styled = (
+        dash_df
+        .style
+        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
+        .format({
+            "Weekly ($)": "${:,.2f}",
+            "14d ($)": "{:+,.2f}",
+            "28d ($)": "{:+,.2f}",
+        })
+    )
+    st.dataframe(styled, use_container_width=True)
 
-# ============================================================
-# ========================= NEWS =============================
-# ============================================================
-
+# ======================= STRATEGY TAB =======================
 with tabs[1]:
+
+    st.subheader("🧠 Strategy Engine")
+
+    scores = []
+    for t in etf_list:
+        score = impact_14d[t] + impact_28d[t]
+        scores.append((t, score))
+
+    scores_sorted = sorted(scores, key=lambda x: x[1], reverse=True)
+
+    avg_score = sum(s for _, s in scores) / len(scores)
+
+    if avg_score > 0:
+        market_state = "🟢 STRONG"
+    elif avg_score < 0:
+        market_state = "🔴 WEAK"
+    else:
+        market_state = "🟡 NEUTRAL"
+
+    st.metric("Overall Market Condition", market_state)
+
+    st.divider()
+
+    strat_rows = []
+    for t, score in scores_sorted:
+        if score > 0:
+            action = "BUY MORE"
+        elif score < 0:
+            action = "CAUTION"
+        else:
+            action = "HOLD"
+
+        strat_rows.append({
+            "Ticker": t,
+            "14d Impact ($)": impact_14d[t],
+            "28d Impact ($)": impact_28d[t],
+            "Momentum Score": round(score, 2),
+            "Suggested Action": action
+        })
+
+    strat_df = pd.DataFrame(strat_rows)
+
+    styled_strat = (
+        strat_df.style
+        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d Impact ($)", "28d Impact ($)", "Momentum Score"])
+        .format("{:+,.2f}", subset=["14d Impact ($)", "28d Impact ($)", "Momentum Score"])
+    )
+
+    st.dataframe(styled_strat, use_container_width=True)
+
+    best_etf = scores_sorted[0][0]
+    st.info(f"📌 **New cash should be directed toward:** {best_etf}")
+
+# ========================= NEWS =============================
+with tabs[2]:
+
     st.subheader("📰 ETF • Market • Stock News")
 
     for tkr in etf_list:
+
         st.markdown(f"### 🔹 {tkr}")
 
         st.markdown("**ETF / Strategy News**")
@@ -200,11 +258,8 @@ with tabs[1]:
 
         st.divider()
 
-# ============================================================
 # ===================== PORTFOLIO TAB ========================
-# ============================================================
-
-with tabs[2]:
+with tabs[3]:
 
     st.subheader("📁 Portfolio Control Panel")
 
@@ -244,20 +299,17 @@ with tabs[2]:
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
-# ============================================================
 # ===================== SNAPSHOTS TAB ========================
-# ============================================================
+with tabs[4]:
 
-with tabs[3]:
-
-    st.subheader("📸 Portfolio Value Snapshots")
+    st.subheader("📸 Portfolio Value Snapshots (v2)")
 
     colA, colB = st.columns(2)
 
     with colA:
         if st.button("💾 Save Snapshot"):
             ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            snap = df[["Ticker", "Value ($)", "Weekly Income ($)"]].copy()
+            snap = df[["Ticker", "Value ($)"]].copy()
             snap["Cash"] = cash
             snap["Total"] = total_value
             snap.to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
@@ -275,21 +327,41 @@ with tabs[3]:
     for f in files:
         try:
             d = pd.read_csv(os.path.join(SNAP_DIR, f))
+            d["Snapshot"] = f
             all_snaps.append(d)
         except:
             pass
 
-    if len(all_snaps) < 1:
-        st.info("No snapshots yet.")
-
+    if not all_snaps:
+        st.info("No snapshots yet. Save at least one to begin tracking.")
     else:
         hist_df = pd.concat(all_snaps)
 
-        if "Total" in hist_df.columns:
-            totals = hist_df.groupby(hist_df.index)["Total"].max()
-            st.line_chart(totals)
+        totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
+        st.line_chart(totals.set_index("Snapshot")["Total"])
 
-        st.subheader("Snapshot Data")
-        st.dataframe(hist_df, use_container_width=True)
+        st.subheader("📊 ETF Performance Across ALL Snapshots")
 
-st.caption("v4.1 • Snapshot safe mode • No Styler • No crashes possible")
+        etf_stats = []
+        for t in etf_list:
+            vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
+
+            etf_stats.append({
+                "Ticker": t,
+                "Start ($)": round(vals.iloc[0], 2),
+                "Latest ($)": round(vals.iloc[-1], 2),
+                "Net ($)": round(vals.iloc[-1] - vals.iloc[0], 2),
+                "Best ($)": round(vals.max(), 2),
+                "Worst ($)": round(vals.min(), 2),
+            })
+
+        stats_df = pd.DataFrame(etf_stats)
+
+        styled_stats = (
+            stats_df.style
+            .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
+            .format("${:,.2f}", subset=[c for c in stats_df.columns if c != "Ticker"])
+        )
+        st.dataframe(styled_stats, use_container_width=True)
+
+st.caption("v3.8 • Strategy tab restored • Snapshot v2 isolated • All tabs preserved")
