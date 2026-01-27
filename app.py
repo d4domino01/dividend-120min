@@ -128,6 +128,7 @@ tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots
 # ============================================================
 
 with tabs[0]:
+
     st.subheader("📊 Overview")
 
     col1, col2 = st.columns(2)
@@ -136,7 +137,29 @@ with tabs[0]:
         st.metric("Annual Income", f"${annual_income:,.2f}")
     with col2:
         st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown(f"**Market:** 🟢 {market_signal}")
+        st.markdown(f"### 🟢 {market_signal}")
+
+    st.divider()
+
+    st.subheader("💥 ETF Signals")
+
+    for t in etf_list:
+
+        r = df[df.Ticker == t].iloc[0]
+        w = r["Weekly Income ($)"]
+
+        c14 = "#22c55e" if impact_14d[t] >= 0 else "#ef4444"
+        c28 = "#22c55e" if impact_28d[t] >= 0 else "#ef4444"
+
+        st.markdown(f"""
+        <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
+        <b>{t}</b><br>
+        Weekly: ${w:.2f}<br><br>
+        <span style="color:{c14}">14d {impact_14d[t]:+.2f}</span> |
+        <span style="color:{c28}">28d {impact_28d[t]:+.2f}</span><br><br>
+        🟢 BUY / HOLD
+        </div>
+        """, unsafe_allow_html=True)
 
 # ============================================================
 # NEWS
@@ -162,22 +185,27 @@ with tabs[1]:
 # ============================================================
 
 with tabs[2]:
+
     st.subheader("📁 Portfolio Control Panel")
 
     for t in etf_list:
+
         st.markdown(f"### {t}")
 
         c1, c2, c3 = st.columns(3)
+
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
                 "Shares", min_value=0, step=1,
                 value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
             )
+
         with c2:
             st.session_state.holdings[t]["div"] = st.number_input(
                 "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
                 value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
             )
+
         with c3:
             st.metric("Price", f"${prices[t]:.2f}")
 
@@ -185,6 +213,7 @@ with tabs[2]:
         st.caption(
             f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
         )
+
         st.divider()
 
     st.subheader("💰 Cash Wallet")
@@ -192,12 +221,12 @@ with tabs[2]:
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ============================================================
-# SNAPSHOTS — CLEAN REBUILD
+# SNAPSHOTS — CLEAN MODE
 # ============================================================
 
 with tabs[3]:
 
-    st.subheader("📸 Portfolio Snapshots (Clean Mode)")
+    st.subheader("📸 Portfolio Snapshots")
 
     if st.button("💾 Save Snapshot"):
         filename = f"snapshot_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
@@ -207,11 +236,10 @@ with tabs[3]:
     files = sorted(os.listdir(SNAP_DIR))
 
     if files:
-        st.markdown("### 📂 Saved Snapshots")
         selected = st.selectbox("View snapshot:", files)
         snap_df = pd.read_csv(os.path.join(SNAP_DIR, selected))
         st.dataframe(snap_df, use_container_width=True)
     else:
-        st.info("No snapshots yet. Save one to start tracking history.")
+        st.info("No snapshots yet.")
 
-st.caption("v3.5 • Snapshot system fully reset • Safe save & view only")
+st.caption("v3.6 • Dashboard restored • Wallet stable • Snapshot clean")
