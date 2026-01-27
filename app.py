@@ -3,40 +3,29 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 
-# ================= CONFIG =================
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ================= ETF LIST =================
 ETF_LIST = ["QDTE", "XDTE", "CHPY", "AIPI", "SPYI", "JEPQ", "ARCC", "MAIN", "KGLD", "VOO"]
 
-# ================= SESSION STATE =================
+# ---------------- SESSION ----------------
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {
-        t: {"shares": 0, "weekly_div_ps": ""} for t in ETF_LIST
-    }
+    st.session_state.holdings = {t: {"shares": 0, "weekly_div_ps": ""} for t in ETF_LIST}
 
-if "cash" not in st.session_state:
-    st.session_state.cash = "0"
-
-# ================= HELPERS =================
-
-@st.cache_data(ttl=3600)
-def get_price(ticker):
+# ---------------- DATA ----------------
+@st.cache_data(ttl=1800)
+def fetch_data(ticker):
     try:
-        return round(yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1], 2)
-    except:
-        return None
+        tk = yf.Ticker(ticker)
+        hist = tk.history(period="5d")
+        price = round(hist["Close"].iloc[-1], 2)
 
-@st.cache_data(ttl=3600)
-def get_auto_div_ps(ticker):
-    try:
-        d = yf.Ticker(ticker).dividends
-        if len(d) == 0:
-            return 0.0
-        recent = d[d.index > datetime.now() - timedelta(days=40)]
-        return round(recent.mean(), 4)
-    except:
-        return 0.0
+        div = tk.dividends
+        recent = div[div.index > datetime.now() - timedelta(days=60)]
+        auto_ps = round(recent.mean(), 4) if len(recent) else 0
+
+        return price, auto_ps
+    except Exception as e:
+        return None, None
 
 def safe_float(x):
     try:
@@ -44,7 +33,7 @@ def safe_float(x):
     except:
         return 0.0
 
-# ================= HEADER =================
+# ---------------- HEADER ----------------
 st.title("📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
@@ -58,24 +47,25 @@ with tabs[0]:
     total_value = 0
     total_monthly = 0
 
+    data = {}
+
     for t in ETF_LIST:
-        price = get_price(t)
-        auto_ps = get_auto_div_ps(t)
+        price, auto_ps = fetch_data(t)
+        data[t] = (price, auto_ps)
 
         shares = st.session_state.holdings[t]["shares"]
         manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
-        div_ps = manual_ps if manual_ps > 0 else auto_ps
+        div_ps = manual_ps if manual_ps > 0 else (auto_ps or 0)
 
-        total_value += (price or 0) * shares
+        if price:
+            total_value += price * shares
         total_monthly += div_ps * shares * 52 / 12
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Value", f"${total_value:,.0f}")
     c2.metric("Monthly Income", f"${total_monthly:,.0f}")
     c3.metric("Annual Income", f"${total_monthly*12:,.0f}")
-
-    market_signal = "BUY" if total_monthly > 0 else "WATCH"
-    c4.metric("Market", market_signal)
+    c4.metric("Market", "BUY" if total_monthly > 0 else "WATCH")
 
     st.divider()
     st.subheader("💥 ETF Signals")
@@ -85,22 +75,28 @@ with tabs[0]:
 
     for t in ETF_LIST[:3]:
 
-        price = get_price(t)
-        auto_ps = get_auto_div_ps(t)
+        price, auto_ps = data[t]
         shares = st.session_state.holdings[t]["shares"]
 
-        weekly = auto_ps * shares
+        weekly = (auto_ps or 0) * shares
         impact_14 = weekly * 2
         impact_28 = weekly * 4
 
-        signal = "BUY / HOLD" if impact_14 >= 0 else "WATCH"
+        signal = "BUY / HOLD" if weekly > 0 else "NO DATA"
 
         with cols[i % 2]:
             with st.container(border=True):
                 st.markdown(f"### {t}")
+
+                if price is None:
+                    st.error("Price data unavailable")
+                else:
+                    st.write(f"Price: ${price}")
+
                 st.write(f"Weekly: ${weekly:.2f}")
                 st.write(f"14d: ${impact_14:.2f} | 28d: ${impact_28:.2f}")
-                if "BUY" in signal:
+
+                if signal == "BUY / HOLD":
                     st.success(signal)
                 else:
                     st.warning(signal)
@@ -109,16 +105,15 @@ with tabs[0]:
 # ================= NEWS =================
 with tabs[1]:
     st.subheader("ETF & Market News")
-    st.info("News feed placeholder — RSS can be added next.")
+    st.info("RSS feed can be added here again next.")
 
 # ================= PORTFOLIO =================
 with tabs[2]:
 
     for t in ETF_LIST:
-        st.subheader(t)
 
-        price = get_price(t)
-        auto_ps = get_auto_div_ps(t)
+        st.subheader(t)
+        price, auto_ps = fetch_data(t)
 
         c1, c2 = st.columns(2)
 
@@ -130,30 +125,30 @@ with tabs[2]:
 
         with c2:
             st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
-                "Weekly Dividend / Share (leave blank = auto)",
-                st.session_state.holdings[t]["weekly_div_ps"], key=f"dps_{t}"
+                "Weekly Dividend / Share (blank = auto)",
+                st.session_state.holdings[t]["weekly_div_ps"], key=f"d_{t}"
             )
 
         shares = st.session_state.holdings[t]["shares"]
         manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
-        div_ps = manual_ps if manual_ps > 0 else auto_ps
+        div_ps = manual_ps if manual_ps > 0 else (auto_ps or 0)
 
-        value = (price or 0) * shares
-        monthly = div_ps * shares * 52 / 12
-
-        st.caption(
-            f"Price: ${price} | Auto Div/Share: ${auto_ps:.4f} | "
-            f"Value: ${value:.2f} | Monthly: ${monthly:.2f}"
-        )
+        if price is None:
+            st.error("Live price unavailable")
+        else:
+            value = price * shares
+            monthly = div_ps * shares * 52 / 12
+            st.caption(
+                f"Price: ${price} | Auto Div/Share: ${auto_ps:.4f} | "
+                f"Value: ${value:.2f} | Monthly: ${monthly:.2f}"
+            )
 
         st.divider()
-
-    st.session_state.cash = st.text_input("Cash Wallet ($)", value=str(st.session_state.cash))
 
 # ================= SNAPSHOTS =================
 with tabs[3]:
     st.subheader("Portfolio Snapshots")
-    st.info("Snapshot export coming next version.")
+    st.info("Snapshot history + charts will be restored next.")
 
 # ================= STRATEGY =================
 with tabs[4]:
@@ -172,4 +167,4 @@ with tabs[4]:
 - Market regime detection  
 """)
 
-    st.success("SAFE MODE — no HTML, all layout stable")
+    st.success("Safe mode active — layout stable")
