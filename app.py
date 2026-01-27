@@ -4,127 +4,205 @@ import pandas as pd
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ---------------- THEME CSS ----------------
-st.markdown("""
-<style>
-body { background-color: #0e1117; }
-.card {
-    background: #111827;
-    padding: 18px;
-    border-radius: 14px;
-    border: 1px solid #1f2933;
-}
-.metric {
-    font-size: 28px;
-    font-weight: 700;
-}
-.label {
-    color: #9ca3af;
-}
-.signal-buy { color: #22c55e; font-weight: 700; }
-.signal-hold { color: #facc15; font-weight: 700; }
-</style>
-""", unsafe_allow_html=True)
+# ---------------- MOCK / BASE DATA ----------------
+# (replace later with live data if needed)
 
-# ---------------- DEFAULT PORTFOLIO ----------------
-ETFS = {
-    "QDTE": {"shares": 125, "weekly_div": 0.177},
-    "CHPY": {"shares": 63, "weekly_div": 0.52},
-    "XDTE": {"shares": 84, "weekly_div": 0.16},
+etf_list = ["QDTE", "CHPY", "XDTE"]
+
+shares = {
+    "QDTE": 125,
+    "CHPY": 63,
+    "XDTE": 84
 }
 
-PRICES = {
+weekly_div_per_share = {
+    "QDTE": 0.177,
+    "CHPY": 0.52,
+    "XDTE": 0.16
+}
+
+prices = {
     "QDTE": 31.21,
-    "CHPY": 61.20,
-    "XDTE": 40.19,
+    "CHPY": 61.19,
+    "XDTE": 40.19
 }
 
-PRICE_CHANGE_14D = {"QDTE": 1.13, "CHPY": 56.99, "XDTE": 3.22}
-PRICE_CHANGE_28D = {"QDTE": 26.50, "CHPY": 307.36, "XDTE": 30.08}
+impact_14d = {
+    "QDTE": 1.13,
+    "CHPY": 56.99,
+    "XDTE": 3.22
+}
+
+impact_28d = {
+    "QDTE": 26.50,
+    "CHPY": 307.36,
+    "XDTE": 30.08
+}
+
+signals = {
+    "QDTE": "BUY / HOLD",
+    "CHPY": "BUY / HOLD",
+    "XDTE": "BUY / HOLD"
+}
 
 # ---------------- CALCULATIONS ----------------
-rows = []
+
+weekly_income_map = {}
 total_value = 0
-weekly_income = 0
+total_weekly_income = 0
 
-for t, d in ETFS.items():
-    value = d["shares"] * PRICES[t]
-    income = d["shares"] * d["weekly_div"]
+for tkr in etf_list:
+    value = shares[tkr] * prices[tkr]
+    income = shares[tkr] * weekly_div_per_share[tkr]
+
     total_value += value
-    weekly_income += income
+    total_weekly_income += income
+    weekly_income_map[tkr] = income
 
-monthly_income = weekly_income * 4.33
+monthly_income = total_weekly_income * 4
 annual_income = monthly_income * 12
 
-# ---------------- HEADER ----------------
-st.markdown("## 📈 Income Strategy Engine")
-st.markdown("Dividend Run-Up Monitor")
+market_signal = "BUY"
 
-# ---------------- TABS (ONLY DASHBOARD ACTIVE) ----------------
+# ---------------- HEADER ----------------
+
+st.title("📈 Income Strategy Engine")
+st.caption("Dividend Run-Up Monitor")
+
 tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# ---------------- DASHBOARD ----------------
+# ============================================================
+# ======================= DASHBOARD ==========================
+# ============================================================
+
 with tabs[0]:
 
-    st.markdown("### 📊 Overview")
+    st.subheader("📊 Overview")
 
-    c1, c2, c3, c4 = st.columns(4)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Value", f"${total_value:,.0f}")
+        st.metric("Annual Income", f"${annual_income:,.0f}")
+    with col2:
+        st.metric("Monthly Income", f"${monthly_income:,.0f}")
+        st.markdown(
+            f"**Market:** {'🟢 BUY' if market_signal == 'BUY' else '🟡 HOLD' if market_signal == 'HOLD' else '🔴 SELL'}"
+        )
 
-    with c1:
-        st.markdown(f"""
-        <div class="card">
-            <div class="label">Total Value</div>
-            <div class="metric">${total_value:,.0f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    st.divider()
 
-    with c2:
-        st.markdown(f"""
-        <div class="card">
-            <div class="label">Monthly Income</div>
-            <div class="metric">${monthly_income:,.0f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # ---- VIEW MODE ----
+    view_mode = st.radio(
+        "View mode",
+        ["📦 Card View", "📋 Compact View"],
+        horizontal=True,
+    )
 
-    with c3:
-        st.markdown(f"""
-        <div class="card">
-            <div class="label">Annual Income</div>
-            <div class="metric">${annual_income:,.0f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # ---- BUILD DASH DATA ----
+    dashboard_rows = []
 
-    with c4:
-        st.markdown(f"""
-        <div class="card">
-            <div class="label">Market</div>
-            <div class="metric"><span class="signal-buy">● BUY</span></div>
-        </div>
-        """, unsafe_allow_html=True)
+    for tkr in etf_list:
+        dashboard_rows.append({
+            "Ticker": tkr,
+            "Weekly ($)": round(weekly_income_map[tkr], 2),
+            "14d ($)": round(impact_14d[tkr], 2),
+            "28d ($)": round(impact_28d[tkr], 2),
+            "Signal": signals[tkr]
+        })
 
-    st.markdown("---")
+    dash_df = pd.DataFrame(dashboard_rows)
 
-    # ---------------- ETF SIGNALS ----------------
-    st.markdown("### 💥 ETF Signals")
+    # ---- COLOR ----
+    def color_pos_neg(val):
+        if isinstance(val, (int, float)):
+            if val > 0:
+                return "color: #4caf50"
+            elif val < 0:
+                return "color: #f44336"
+        return ""
 
-    for t, d in ETFS.items():
-        weekly = d["shares"] * d["weekly_div"]
-        c14 = PRICE_CHANGE_14D[t]
-        c28 = PRICE_CHANGE_28D[t]
+    # ---------------- COMPACT VIEW ----------------
+    if view_mode == "📋 Compact View":
 
-        signal = "BUY / HOLD" if c28 > 0 else "HOLD"
+        st.subheader("⚡ ETF Signals (Compact)")
 
-        st.markdown(f"""
-        <div class="card" style="margin-bottom:12px;">
-            <b>{t}</b><br>
-            <span class="label">Weekly:</span> ${weekly:.2f}<br><br>
-            <span class="label">14d:</span> <span class="signal-buy">{c14:.2f}</span> |
-            <span class="label">28d:</span> <span class="signal-buy">{c28:.2f}</span><br><br>
-            <span class="signal-buy">● {signal}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        styled = (
+            dash_df
+            .style
+            .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
+        )
 
-# ---------------- OTHER TABS DISABLED ----------------
-for i in [1, 2, 3]:
-    with tabs[i]:
-        st.info("🔒 Disabled for now — Dashboard only while we stabilise the app.")
+        st.dataframe(styled, use_container_width=True)
+
+    # ---------------- CARD VIEW ----------------
+    else:
+
+        st.subheader("💥 ETF Signals")
+
+        for _, row in dash_df.iterrows():
+
+            chg14_color = "#4caf50" if row["14d ($)"] >= 0 else "#f44336"
+            chg28_color = "#4caf50" if row["28d ($)"] >= 0 else "#f44336"
+
+            signal_color = "🟢" if row["Signal"] in ["BUY", "BUY / HOLD"] else "🟡" if row["Signal"] == "HOLD" else "🔴"
+
+            st.markdown(
+                f"""
+                <div style="
+                    background: linear-gradient(135deg, #0f172a, #020617);
+                    border-radius: 16px;
+                    padding: 16px;
+                    margin-bottom: 14px;
+                    border: 1px solid rgba(255,255,255,0.05);
+                ">
+                    <h4 style="margin-bottom:6px;">{row['Ticker']}</h4>
+                    <div style="color:#cbd5e1;">Weekly: ${row['Weekly ($)']:.2f}</div>
+                    <div style="margin-top:8px;">
+                        <span style="color:{chg14_color};">14d: {row['14d ($)']:+.2f}</span>
+                        &nbsp; | &nbsp;
+                        <span style="color:{chg28_color};">28d: {row['28d ($)']:+.2f}</span>
+                    </div>
+                    <div style="margin-top:10px; font-weight:600;">
+                        {signal_color} {row['Signal']}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    st.caption("Dashboard v2 • Compact + Card views • Momentum colored")
+
+# ============================================================
+# ======================= NEWS TAB ===========================
+# ============================================================
+
+with tabs[1]:
+    st.subheader("📰 News")
+    st.info("News feed coming back next. Dashboard stabilized first.")
+
+# ============================================================
+# ===================== PORTFOLIO TAB ========================
+# ============================================================
+
+with tabs[2]:
+    st.subheader("📁 Portfolio")
+
+    rows = []
+    for tkr in etf_list:
+        rows.append({
+            "Ticker": tkr,
+            "Shares": shares[tkr],
+            "Price": prices[tkr],
+            "Value": round(shares[tkr] * prices[tkr], 2),
+            "Weekly Income": round(weekly_income_map[tkr], 2)
+        })
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+# ============================================================
+# ===================== SNAPSHOTS TAB ========================
+# ============================================================
+
+with tabs[3]:
+    st.subheader("📸 Snapshots")
+    st.info("Snapshot history + backtesting will be restored after strategy logic.")
