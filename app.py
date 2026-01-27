@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import feedparser
@@ -102,7 +103,7 @@ for t in etf_list:
 df = pd.DataFrame(rows)
 
 cash = float(st.session_state.cash)
-total_value = stock_value_total + cash
+total_value = round(stock_value_total + cash, 2)
 monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
 market_signal = "BUY"
@@ -239,55 +240,39 @@ with tabs[2]:
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
-# ===================== SNAPSHOTS (CLEAN) ========================
+# ===================== SNAPSHOTS (SAFE) ========================
 with tabs[3]:
 
-    st.subheader("📸 Snapshots (Clean Reset System)")
+    st.subheader("📸 Portfolio Value Snapshots")
 
     SNAP_DIR = "snapshots"
     os.makedirs(SNAP_DIR, exist_ok=True)
 
-    # HARD RESET OLD FILES
-    if st.button("🧹 Reset Snapshot History"):
+    if st.button("🧹 Delete ALL Snapshots"):
         for f in os.listdir(SNAP_DIR):
             os.remove(os.path.join(SNAP_DIR, f))
-        st.success("All old snapshots deleted. Clean start.")
+        st.success("All snapshots deleted.")
 
     if st.button("💾 Save Snapshot"):
-        snap_rows = []
-        for _, r in df.iterrows():
-            snap_rows.append({
-                "Ticker": r["Ticker"],
-                "Value ($)": r["Value ($)"]
-            })
-
-        snap_df = pd.DataFrame(snap_rows)
-        snap_df["Total Portfolio ($)"] = round(total_value, 2)
-        snap_df["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
+        snap = pd.DataFrame([{
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "Total Value ($)": total_value
+        }])
         fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
-        snap_df.to_csv(os.path.join(SNAP_DIR, fname), index=False)
+        snap.to_csv(os.path.join(SNAP_DIR, fname), index=False)
         st.success("Snapshot saved.")
 
-    files = sorted(os.listdir(SNAP_DIR), reverse=True)
+    files = sorted(os.listdir(SNAP_DIR))
 
     if files:
-        sel = st.selectbox("Compare with snapshot", files)
+        history = []
+        for f in files:
+            dfh = pd.read_csv(os.path.join(SNAP_DIR, f))
+            history.append(dfh.iloc[0])
 
-        old = pd.read_csv(os.path.join(SNAP_DIR, sel))
-        merged = df.merge(old, on="Ticker")
-
-        merged["Change ($)"] = (merged["Value ($)"] - merged["Value ($)_y"]).round(2)
-
-        show = pd.DataFrame({
-            "Ticker": merged["Ticker"],
-            "Now ($)": merged["Value ($)"],
-            "Then ($)": merged["Value ($)_y"],
-            "Change ($)": merged["Change ($)"]
-        })
-
-        st.dataframe(show, use_container_width=True)
+        hist_df = pd.DataFrame(history)
+        st.line_chart(hist_df.set_index("Timestamp")["Total Value ($)"])
     else:
-        st.info("No snapshots yet. Save your first snapshot.")
+        st.info("No snapshots yet.")
 
-st.caption("v3.4 • Snapshot corruption fixed • Safe compare mode")
+st.caption("v3.5 • Snapshot system rebuilt • No merge errors possible")
