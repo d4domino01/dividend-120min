@@ -4,7 +4,6 @@ import feedparser
 import yfinance as yf
 import os
 from datetime import datetime
-import altair as alt
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -139,50 +138,6 @@ with tabs[0]:
         st.metric("Monthly Income", f"${monthly_income:,.2f}")
         st.markdown(f"**Market:** 🟢 {market_signal}")
 
-    st.divider()
-
-    view_mode = st.radio("View mode", ["📦 Card View", "📋 Compact View"], horizontal=True)
-
-    dash_rows = []
-    for _, r in df.iterrows():
-        dash_rows.append({
-            "Ticker": r["Ticker"],
-            "Weekly ($)": r["Weekly Income ($)"],
-            "14d ($)": impact_14d[r["Ticker"]],
-            "28d ($)": impact_28d[r["Ticker"]],
-            "Signal": "BUY / HOLD"
-        })
-
-    dash_df = pd.DataFrame(dash_rows)
-
-    def color_pos_neg(val):
-        if val > 0:
-            return "color:#22c55e"
-        elif val < 0:
-            return "color:#ef4444"
-        return ""
-
-    if view_mode == "📋 Compact View":
-        styled = (
-            dash_df.style
-            .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
-            .format({"Weekly ($)": "${:,.2f}", "14d ($)": "{:+,.2f}", "28d ($)": "{:+,.2f}"})
-        )
-        st.dataframe(styled, use_container_width=True)
-    else:
-        for _, row in dash_df.iterrows():
-            c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
-            c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
-            st.markdown(f"""
-            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-            <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly ($)']:.2f}<br><br>
-            <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br><br>
-            🟢 {row['Signal']}
-            </div>
-            """, unsafe_allow_html=True)
-
 # ============================================================
 # NEWS
 # ============================================================
@@ -211,6 +166,7 @@ with tabs[2]:
 
     for t in etf_list:
         st.markdown(f"### {t}")
+
         c1, c2, c3 = st.columns(3)
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
@@ -226,7 +182,9 @@ with tabs[2]:
             st.metric("Price", f"${prices[t]:.2f}")
 
         r = df[df.Ticker == t].iloc[0]
-        st.caption(f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}")
+        st.caption(
+            f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
+        )
         st.divider()
 
     st.subheader("💰 Cash Wallet")
@@ -234,51 +192,26 @@ with tabs[2]:
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ============================================================
-# SNAPSHOTS (FIXED)
+# SNAPSHOTS — CLEAN REBUILD
 # ============================================================
 
 with tabs[3]:
 
-    st.subheader("📸 Portfolio Snapshots & Backtest")
+    st.subheader("📸 Portfolio Snapshots (Clean Mode)")
 
     if st.button("💾 Save Snapshot"):
-        path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-        df.to_csv(path, index=False)
+        filename = f"snapshot_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+        df.to_csv(os.path.join(SNAP_DIR, filename), index=False)
         st.success("Snapshot saved")
 
     files = sorted(os.listdir(SNAP_DIR))
 
     if files:
-        snap = st.selectbox("Compare with snapshot:", files)
-        snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
-
-        value_col = "Value ($)" if "Value ($)" in snap_df.columns else snap_df.columns[-1]
-
-        comp = df[["Ticker", "Value ($)"]].merge(
-            snap_df[["Ticker", value_col]],
-            on="Ticker",
-            suffixes=("_Now", "_Then")
-        )
-
-        comp["Change ($)"] = comp["Value ($)_Now"] - comp[f"{value_col}_Then"]
-
-        st.dataframe(comp, use_container_width=True)
-
-        hist_vals = []
-        for f in files:
-            d = pd.read_csv(os.path.join(SNAP_DIR, f))
-            vcol = "Value ($)" if "Value ($)" in d.columns else d.columns[-1]
-            hist_vals.append({"Date": f.replace(".csv", ""), "Total Value": d[vcol].sum()})
-
-        chart_df = pd.DataFrame(hist_vals)
-
-        chart = alt.Chart(chart_df).mark_line(point=True).encode(
-            x="Date", y="Total Value"
-        )
-
-        st.altair_chart(chart, use_container_width=True)
-
+        st.markdown("### 📂 Saved Snapshots")
+        selected = st.selectbox("View snapshot:", files)
+        snap_df = pd.read_csv(os.path.join(SNAP_DIR, selected))
+        st.dataframe(snap_df, use_container_width=True)
     else:
-        st.info("No snapshots yet. Save your first snapshot above.")
+        st.info("No snapshots yet. Save one to start tracking history.")
 
-st.caption("v3.4 • Snapshot KeyError fixed • Older snapshots supported • Baseline preserved")
+st.caption("v3.5 • Snapshot system fully reset • Safe save & view only")
