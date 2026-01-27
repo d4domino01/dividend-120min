@@ -8,15 +8,28 @@ import feedparser
 
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ================= HELPERS =================
+# ================= CSS =================
 
-def safe_float(x):
-    try:
-        if isinstance(x, str):
-            x = x.replace(",", ".")
-        return float(x)
-    except:
-        return 0.0
+st.markdown("""
+<style>
+.grid2 {
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+.card {
+  background:#111;
+  border-radius:16px;
+  padding:14px;
+  border:1px solid #222;
+}
+.card small {opacity:0.75}
+.signal-dot {
+  width:12px;height:12px;border-radius:50%;
+  display:inline-block;margin-right:6px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ================= CONFIG =================
 
@@ -41,7 +54,15 @@ if "holdings" not in st.session_state:
 if "cash" not in st.session_state:
     st.session_state.cash = ""
 
-# ================= DATA =================
+# ================= HELPERS =================
+
+def safe_float(x):
+    try:
+        if isinstance(x, str):
+            x = x.replace(",", ".")
+        return float(x)
+    except:
+        return 0.0
 
 @st.cache_data(ttl=600)
 def get_hist(ticker, days=60):
@@ -74,16 +95,6 @@ def get_trend(ticker):
         return "Up" if df["Close"].iloc[-1] > df["Close"].iloc[0] else "Down"
     except:
         return "Unknown"
-
-@st.cache_data(ttl=600)
-def get_drawdown(ticker):
-    try:
-        df = yf.Ticker(ticker).history(period="1mo")
-        high = df["Close"].max()
-        last = df["Close"].iloc[-1]
-        return round((high - last) / high * 100, 2)
-    except:
-        return 0
 
 @st.cache_data(ttl=900)
 def get_rss(url):
@@ -129,25 +140,6 @@ market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
 
 # ================= HEADER =================
 
-st.markdown("""
-<style>
-.grid2 {
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:12px;
-}
-.card {
-  background:#111;
-  border-radius:14px;
-  padding:14px;
-  border:1px solid #222;
-}
-.signal-dot {
-  width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:6px;
-}
-</style>
-""", unsafe_allow_html=True)
-
 st.markdown("## 📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
@@ -170,7 +162,7 @@ with tabs[0]:
 
     st.markdown("#### 💥 ETF Signals")
 
-    sig_cards = ""
+    cards = ""
 
     for t in ETF_LIST:
         hist = get_hist(t)
@@ -194,7 +186,7 @@ with tabs[0]:
         else:
             sig = "REDUCE"; color="#F44336"
 
-        sig_cards += f"""
+        cards += f"""
         <div class="card">
           <b>{t}</b><br>
           <small>Weekly: ${weekly:.2f}</small><br>
@@ -203,7 +195,7 @@ with tabs[0]:
         </div>
         """
 
-    st.markdown(f'<div class="grid2">{sig_cards}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="grid2">{cards}</div>', unsafe_allow_html=True)
 
 # ================= NEWS =================
 
@@ -261,9 +253,9 @@ with tabs[3]:
 
         chart = alt.Chart(chart_df).mark_line(point=True).encode(
             x="Date",
-            y=alt.Y("Total", scale=alt.Scale(domain=[10000, 12000]))
+            y="Total"
         )
 
         st.altair_chart(chart, use_container_width=True)
 
-st.caption("v28 • Forced 2-column cards on mobile • Tabs intact • No features removed")
+st.caption("v29 • HTML rendering fixed • True 2-column cards on mobile • Tabs intact")
