@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import feedparser
 import yfinance as yf
-from datetime import datetime
 import os
+from datetime import datetime
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -62,9 +62,7 @@ prices = {t: get_price(t) for t in etf_list}
 rows = []
 stock_value_total = 0.0
 total_weekly_income = 0.0
-
-impact_14d = {}
-impact_28d = {}
+impact_14d, impact_28d = {}, {}
 
 for t in etf_list:
     h = st.session_state.holdings[t]
@@ -88,11 +86,9 @@ for t in etf_list:
             impact_14d[t] = round((now - d14) * shares, 2)
             impact_28d[t] = round((now - d28) * shares, 2)
         else:
-            impact_14d[t] = 0.0
-            impact_28d[t] = 0.0
+            impact_14d[t] = impact_28d[t] = 0.0
     except:
-        impact_14d[t] = 0.0
-        impact_28d[t] = 0.0
+        impact_14d[t] = impact_28d[t] = 0.0
 
     rows.append({
         "Ticker": t,
@@ -106,11 +102,11 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
-# ---- TOTALS (INCLUDE CASH) ----
 cash = float(st.session_state.cash)
 total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
+market_signal = "BUY"
 
 # ---------------- HEADER ----------------
 st.title("📈 Income Strategy Engine")
@@ -118,10 +114,7 @@ st.caption("Dividend Run-Up Monitor")
 
 tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# ============================================================
 # ======================= DASHBOARD ==========================
-# ============================================================
-
 with tabs[0]:
 
     st.subheader("📊 Overview")
@@ -132,76 +125,64 @@ with tabs[0]:
         st.metric("Annual Income", f"${annual_income:,.2f}")
     with col2:
         st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown("### 🟢 BUY")
+        st.markdown(f"**Market:** 🟢 {market_signal}")
 
     st.divider()
 
-    # ✅ TOGGLE: Cards OR Table — NEVER BOTH
-    show_table = st.toggle("Show table view", value=False)
+    table_only = st.toggle("Table view only", value=False)
 
-    # ---------------- CARD VIEW ----------------
-    if not show_table:
+    dash_rows = []
+    for _, r in df.iterrows():
+        dash_rows.append({
+            "Ticker": r["Ticker"],
+            "Weekly ($)": r["Weekly Income ($)"],
+            "14d ($)": impact_14d[r["Ticker"]],
+            "28d ($)": impact_28d[r["Ticker"]],
+            "Signal": "BUY / HOLD"
+        })
 
-        for t in etf_list:
-            weekly = df[df.Ticker == t]["Weekly Income ($)"].values[0]
-            c14 = "#22c55e" if impact_14d[t] >= 0 else "#ef4444"
-            c28 = "#22c55e" if impact_28d[t] >= 0 else "#ef4444"
+    dash_df = pd.DataFrame(dash_rows)
+
+    def color_pos_neg(val):
+        if val > 0:
+            return "color:#22c55e"
+        elif val < 0:
+            return "color:#ef4444"
+        return ""
+
+    styled = (
+        dash_df
+        .style
+        .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
+        .format({
+            "Weekly ($)": "${:,.2f}",
+            "14d ($)": "{:+,.2f}",
+            "28d ($)": "{:+,.2f}",
+        })
+    )
+
+    if not table_only:
+        for _, row in dash_df.iterrows():
+            c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
+            c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
 
             st.markdown(f"""
             <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-                <b>{t}</b><br>
-                Weekly: ${weekly:.2f}<br><br>
-                <span style="color:{c14}">14d {impact_14d[t]:+.2f}</span> |
-                <span style="color:{c28}">28d {impact_28d[t]:+.2f}</span><br><br>
-                🟢 BUY / HOLD
+            <b>{row['Ticker']}</b><br>
+            Weekly: ${row['Weekly ($)']:.2f}<br><br>
+            <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
+            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br><br>
+            🟢 {row['Signal']}
             </div>
             """, unsafe_allow_html=True)
 
-    # ---------------- TABLE VIEW ----------------
-    else:
+    st.dataframe(styled, use_container_width=True)
 
-        dash_rows = []
-        for _, r in df.iterrows():
-            dash_rows.append({
-                "Ticker": r["Ticker"],
-                "Weekly ($)": r["Weekly Income ($)"],
-                "14d ($)": impact_14d[r["Ticker"]],
-                "28d ($)": impact_28d[r["Ticker"]],
-                "Signal": "BUY / HOLD"
-            })
-
-        dash_df = pd.DataFrame(dash_rows)
-
-        def color_pos_neg(val):
-            if val > 0:
-                return "color:#22c55e"
-            elif val < 0:
-                return "color:#ef4444"
-            return ""
-
-        styled = (
-            dash_df
-            .style
-            .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
-            .format({
-                "Weekly ($)": "${:,.2f}",
-                "14d ($)": "{:+,.2f}",
-                "28d ($)": "{:+,.2f}",
-            })
-        )
-
-        st.dataframe(styled, use_container_width=True)
-
-# ============================================================
 # ========================= NEWS =============================
-# ============================================================
-
 with tabs[1]:
-
     st.subheader("📰 ETF • Market • Stock News")
 
     for tkr in etf_list:
-
         st.markdown(f"### 🔹 {tkr}")
 
         st.markdown("**ETF / Strategy News**")
@@ -218,10 +199,7 @@ with tabs[1]:
 
         st.divider()
 
-# ============================================================
 # ===================== PORTFOLIO TAB ========================
-# ============================================================
-
 with tabs[2]:
 
     st.subheader("📁 Portfolio Control Panel")
@@ -255,47 +233,56 @@ with tabs[2]:
         st.divider()
 
     st.subheader("💰 Cash Wallet")
-
     st.session_state.cash = st.number_input(
         "Cash ($)", min_value=0.0, step=50.0,
-        value=float(st.session_state.cash), key="cash_wallet"
+        value=float(st.session_state.cash)
     )
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
-# ============================================================
-# ===================== SNAPSHOTS TAB ========================
-# ============================================================
-
-SNAP_DIR = "snapshots"
-os.makedirs(SNAP_DIR, exist_ok=True)
-
+# ===================== SNAPSHOTS TAB (RESET) ========================
 with tabs[3]:
 
-    st.subheader("📸 Snapshots")
+    st.subheader("📸 Snapshots (New System)")
+
+    SNAP_DIR = "snapshots"
+    os.makedirs(SNAP_DIR, exist_ok=True)
 
     if st.button("💾 Save Snapshot"):
-        snap = df[["Ticker", "Value ($)"]].copy()
-        snap["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        fname = f"{SNAP_DIR}/{datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
-        snap.to_csv(fname, index=False)
-        st.success("Snapshot saved")
+        snap_rows = []
+        for _, r in df.iterrows():
+            snap_rows.append({
+                "Ticker": r["Ticker"],
+                "Shares": r["Shares"],
+                "Price": r["Price ($)"],
+                "Value": r["Value ($)"],
+            })
 
-    files = sorted(os.listdir(SNAP_DIR))
+        snap_df = pd.DataFrame(snap_rows)
+        snap_df["Total Portfolio"] = round(total_value, 2)
+        snap_df["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
+        snap_df.to_csv(os.path.join(SNAP_DIR, fname), index=False)
+
+        st.success("Snapshot saved.")
+
+    files = sorted(os.listdir(SNAP_DIR), reverse=True)
+
     if files:
-        sel = st.selectbox("Compare snapshot:", files)
-        snap_df = pd.read_csv(f"{SNAP_DIR}/{sel}")
+        sel = st.selectbox("Compare with snapshot", files)
 
-        now_df = df[["Ticker", "Value ($)"]].copy()
-        merged = now_df.merge(snap_df, on="Ticker", suffixes=("_Now", "_Then"))
-        merged["Change ($)"] = (merged["Value ($)_Now"] - merged["Value ($)_Then"]).round(2)
+        old = pd.read_csv(os.path.join(SNAP_DIR, sel))
 
-        st.dataframe(merged, use_container_width=True)
+        merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Then"))
+        merged["Change ($)"] = (merged["Value ($)_Now"] - merged["Value"]).round(2)
 
-        chart_df = merged[["Ticker", "Value ($)_Now", "Value ($)_Then"]].set_index("Ticker")
-        st.line_chart(chart_df)
+        show = merged[["Ticker", "Value ($)_Now", "Value", "Change ($)"]]
+        show.columns = ["Ticker", "Value Now ($)", "Value Then ($)", "Change ($)"]
+
+        st.dataframe(show, use_container_width=True)
 
     else:
-        st.info("No snapshots yet.")
+        st.info("No snapshots yet. Save your first snapshot above.")
 
-st.caption("Stable version • Dashboard toggle fixed • Wallet stable • All tabs preserved")
+st.caption("v3.3 • Snapshots fully reset • Stable base restored")
