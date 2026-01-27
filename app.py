@@ -94,7 +94,6 @@ for t in etf_list:
         "Ticker": t,
         "Shares": shares,
         "Price ($)": price,
-        "Div / Share ($)": div,
         "Weekly Income ($)": round(weekly_income, 2),
         "Monthly Income ($)": round(monthly_income, 2),
         "Value ($)": round(value, 2),
@@ -240,31 +239,34 @@ with tabs[2]:
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
-# ===================== SNAPSHOTS TAB (RESET) ========================
+# ===================== SNAPSHOTS (CLEAN) ========================
 with tabs[3]:
 
-    st.subheader("📸 Snapshots (New System)")
+    st.subheader("📸 Snapshots (Clean Reset System)")
 
     SNAP_DIR = "snapshots"
     os.makedirs(SNAP_DIR, exist_ok=True)
+
+    # HARD RESET OLD FILES
+    if st.button("🧹 Reset Snapshot History"):
+        for f in os.listdir(SNAP_DIR):
+            os.remove(os.path.join(SNAP_DIR, f))
+        st.success("All old snapshots deleted. Clean start.")
 
     if st.button("💾 Save Snapshot"):
         snap_rows = []
         for _, r in df.iterrows():
             snap_rows.append({
                 "Ticker": r["Ticker"],
-                "Shares": r["Shares"],
-                "Price": r["Price ($)"],
-                "Value": r["Value ($)"],
+                "Value ($)": r["Value ($)"]
             })
 
         snap_df = pd.DataFrame(snap_rows)
-        snap_df["Total Portfolio"] = round(total_value, 2)
+        snap_df["Total Portfolio ($)"] = round(total_value, 2)
         snap_df["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
         snap_df.to_csv(os.path.join(SNAP_DIR, fname), index=False)
-
         st.success("Snapshot saved.")
 
     files = sorted(os.listdir(SNAP_DIR), reverse=True)
@@ -273,16 +275,19 @@ with tabs[3]:
         sel = st.selectbox("Compare with snapshot", files)
 
         old = pd.read_csv(os.path.join(SNAP_DIR, sel))
+        merged = df.merge(old, on="Ticker")
 
-        merged = df.merge(old, on="Ticker", suffixes=("_Now", "_Then"))
-        merged["Change ($)"] = (merged["Value ($)_Now"] - merged["Value"]).round(2)
+        merged["Change ($)"] = (merged["Value ($)"] - merged["Value ($)_y"]).round(2)
 
-        show = merged[["Ticker", "Value ($)_Now", "Value", "Change ($)"]]
-        show.columns = ["Ticker", "Value Now ($)", "Value Then ($)", "Change ($)"]
+        show = pd.DataFrame({
+            "Ticker": merged["Ticker"],
+            "Now ($)": merged["Value ($)"],
+            "Then ($)": merged["Value ($)_y"],
+            "Change ($)": merged["Change ($)"]
+        })
 
         st.dataframe(show, use_container_width=True)
-
     else:
-        st.info("No snapshots yet. Save your first snapshot above.")
+        st.info("No snapshots yet. Save your first snapshot.")
 
-st.caption("v3.3 • Snapshots fully reset • Stable base restored")
+st.caption("v3.4 • Snapshot corruption fixed • Safe compare mode")
