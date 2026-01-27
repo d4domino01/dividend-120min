@@ -2,30 +2,16 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-import os, json
-import streamlit.components.v1 as components
+import os
 import altair as alt
 import feedparser
-
-# ================= HELPERS =================
-
-def safe_float(x):
-    try:
-        if isinstance(x, str):
-            x = x.replace(",", ".")
-        return float(x)
-    except:
-        return 0.0
 
 # ================= PAGE =================
 
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 
-st.markdown(
-    "<div style='font-size:26px;font-weight:800;'>📈 Income Strategy Engine</div>"
-    "<div style='font-size:13px;opacity:0.7;'>Dividend Run-Up Monitor</div>",
-    unsafe_allow_html=True
-)
+st.markdown("#### 📈 Income Strategy Engine")
+st.caption("Dividend Run-Up Monitor")
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
@@ -39,15 +25,15 @@ RSS_MAP = {
 SNAP_DIR = "snapshots"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
-# ================= STORAGE =================
+# ================= HELPERS =================
 
-def save_to_browser(state):
-    components.html(
-        f"""<script>
-        localStorage.setItem("portfolio_state", JSON.stringify({json.dumps(state)}));
-        </script>""",
-        height=0,
-    )
+def safe_float(x):
+    try:
+        if isinstance(x, str):
+            x = x.replace(",", ".")
+        return float(x)
+    except:
+        return 0.0
 
 # ================= SESSION =================
 
@@ -129,33 +115,21 @@ total_monthly_income = total_annual_income / 12
 down = (df["Trend"] == "Down").sum()
 market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
 
-# ================= KPI CARDS =================
+# ================= KPI CARDS (2x2) =================
 
-kpi_html = f"""
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
-  <div style="background:#111;padding:16px;border-radius:14px;text-align:center">
-    <div style="opacity:0.7;font-size:13px">Total Value</div>
-    <div style="font-size:28px;font-weight:700">${total_value:,.0f}</div>
-  </div>
-  <div style="background:#111;padding:16px;border-radius:14px;text-align:center">
-    <div style="opacity:0.7;font-size:13px">Monthly Income</div>
-    <div style="font-size:28px;font-weight:700">${total_monthly_income:,.0f}</div>
-  </div>
-  <div style="background:#111;padding:16px;border-radius:14px;text-align:center">
-    <div style="opacity:0.7;font-size:13px">Annual Income</div>
-    <div style="font-size:26px;font-weight:700">${total_annual_income:,.0f}</div>
-  </div>
-  <div style="background:#111;padding:16px;border-radius:14px;text-align:center">
-    <div style="opacity:0.7;font-size:13px">Market</div>
-    <div style="font-size:22px;font-weight:700">
-      <span style="width:12px;height:12px;border-radius:50%;display:inline-block;background:#4CAF50;margin-right:6px"></span>
-      {market}
-    </div>
-  </div>
-</div>
-"""
+st.markdown("#### 📊 Overview")
 
-st.markdown(kpi_html, unsafe_allow_html=True)
+c1, c2 = st.columns(2)
+with c1:
+    st.metric("Total Value", f"${total_value:,.0f}")
+with c2:
+    st.metric("Monthly Income", f"${total_monthly_income:,.0f}")
+
+c3, c4 = st.columns(2)
+with c3:
+    st.metric("Annual Income", f"${total_annual_income:,.0f}")
+with c4:
+    st.markdown(f"**Market**  \n🟢 **{market}**")
 
 # ================= TABS =================
 
@@ -164,57 +138,52 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio
 # ================= ETF SIGNAL CARDS =================
 
 with tab1:
-    st.markdown("## 💥 ETF Signals")
+    st.markdown("#### 💥 ETF Signals")
 
-    html = "<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>"
+    for i in range(0, len(ETF_LIST), 2):
+        cols = st.columns(2)
 
-    for t in ETF_LIST:
-        hist = get_hist(t)
-        shares = st.session_state.holdings[t]["shares"]
+        for j in range(2):
+            if i + j >= len(ETF_LIST):
+                continue
 
-        if hist is not None and len(hist) > 25:
-            now = hist["Close"].iloc[-1]
-            d14 = hist["Close"].iloc[-10]
-            d28 = hist["Close"].iloc[-20]
-            chg14 = (now - d14) * shares
-            chg28 = (now - d28) * shares
-        else:
-            chg14 = chg28 = 0
+            t = ETF_LIST[i + j]
+            hist = get_hist(t)
+            shares = st.session_state.holdings[t]["shares"]
 
-        weekly = df[df.Ticker == t]["Weekly"].iloc[0]
+            if hist is not None and len(hist) > 25:
+                now = hist["Close"].iloc[-1]
+                d14 = hist["Close"].iloc[-10]
+                d28 = hist["Close"].iloc[-20]
+                chg14 = (now - d14) * shares
+                chg28 = (now - d28) * shares
+            else:
+                chg14 = chg28 = 0
 
-        if chg14 >= 0 and chg28 >= 0:
-            sig = "BUY / HOLD"
-            color = "#4CAF50"
-        elif weekly >= abs(chg28) or weekly >= abs(chg14):
-            sig = "WATCH"
-            color = "#FFC107"
-        else:
-            sig = "REDUCE"
-            color = "#F44336"
+            weekly = df[df.Ticker == t]["Weekly"].iloc[0]
 
-        html += f"""
-        <div style="background:#111;border-radius:14px;padding:14px;">
-            <div style="font-weight:700;font-size:16px">{t}</div>
-            <div style="font-size:13px;opacity:0.8">Weekly: ${weekly:.2f}</div>
-            <div style="font-size:13px;opacity:0.8">14d: ${chg14:.2f} | 28d: ${chg28:.2f}</div>
-            <div style="display:flex;align-items:center;margin-top:8px">
-                <span style="width:12px;height:12px;border-radius:50%;background:{color};margin-right:8px"></span>
-                <b>{sig}</b>
-            </div>
-        </div>
-        """
+            if chg14 >= 0 and chg28 >= 0:
+                sig = "BUY / HOLD"
+                dot = "🟢"
+            elif weekly >= abs(chg28) or weekly >= abs(chg14):
+                sig = "WATCH"
+                dot = "🟡"
+            else:
+                sig = "REDUCE"
+                dot = "🔴"
 
-    html += "</div>"
-
-    # 🔴 THIS is the critical line — must be markdown + unsafe
-    st.markdown(html, unsafe_allow_html=True)
+            with cols[j]:
+                with st.container(border=True):
+                    st.markdown(f"**{t}**")
+                    st.caption(f"Weekly: ${weekly:.2f}")
+                    st.caption(f"14d: ${chg14:.2f} | 28d: ${chg28:.2f}")
+                    st.markdown(f"{dot} **{sig}**")
 
 # ================= NEWS =================
 
 with tab2:
     for t in ETF_LIST:
-        st.markdown(f"### 📌 {t} News")
+        st.markdown(f"#### {t} News")
         for n in get_rss(RSS_MAP[t]):
             st.markdown(f"• [{n.title}]({n.link})")
         st.divider()
@@ -223,7 +192,7 @@ with tab2:
 
 with tab3:
     for t in ETF_LIST:
-        st.markdown(f"### {t}")
+        st.markdown(f"#### {t}")
         c1, c2 = st.columns(2)
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input("Shares", min_value=0, value=st.session_state.holdings[t]["shares"], key=f"s_{t}")
@@ -237,7 +206,7 @@ with tab4:
     if st.button("💾 Save Snapshot"):
         path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
         df.to_csv(path, index=False)
-        st.success("Saved")
+        st.success("Snapshot saved")
 
     files = sorted(os.listdir(SNAP_DIR))
     if files:
@@ -259,6 +228,4 @@ with tab4:
         )
         st.altair_chart(chart, use_container_width=True)
 
-save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
-
-st.caption("v24.0 — Cards fixed • HTML rendering corrected • Layout restored")
+st.caption("v25.0 • Mobile safe • 2-column cards • Small headers only")
