@@ -60,9 +60,7 @@ def get_price(ticker):
         return 0.0
 
 # ---------------- BUILD LIVE DATA ----------------
-prices = {}
-for t in etf_list:
-    prices[t] = get_price(t)
+prices = {t: get_price(t) for t in etf_list}
 
 # ---------------- CALCULATIONS ----------------
 rows = []
@@ -127,11 +125,10 @@ st.caption("Dividend Run-Up Monitor")
 tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
 # ============================================================
-# ======================= DASHBOARD ==========================
+# DASHBOARD
 # ============================================================
 
 with tabs[0]:
-
     st.subheader("📊 Overview")
 
     col1, col2 = st.columns(2)
@@ -166,25 +163,16 @@ with tabs[0]:
         return ""
 
     if view_mode == "📋 Compact View":
-
         styled = (
-            dash_df
-            .style
+            dash_df.style
             .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
-            .format({
-                "Weekly ($)": "${:,.2f}",
-                "14d ($)": "{:+,.2f}",
-                "28d ($)": "{:+,.2f}",
-            })
+            .format({"Weekly ($)": "${:,.2f}", "14d ($)": "{:+,.2f}", "28d ($)": "{:+,.2f}"})
         )
         st.dataframe(styled, use_container_width=True)
-
     else:
-
         for _, row in dash_df.iterrows():
             c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
             c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
-
             st.markdown(f"""
             <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
             <b>{row['Ticker']}</b><br>
@@ -196,80 +184,57 @@ with tabs[0]:
             """, unsafe_allow_html=True)
 
 # ============================================================
-# ========================= NEWS =============================
+# NEWS
 # ============================================================
 
 with tabs[1]:
-
     st.subheader("📰 ETF • Market • Stock News")
-
     for tkr in etf_list:
-
         st.markdown(f"### 🔹 {tkr}")
-
         st.markdown("**ETF / Strategy News**")
         for n in get_news(NEWS_FEEDS[tkr]["etf"]):
             st.markdown(f"- [{n.title}]({n.link})")
-
         st.markdown("**Underlying Market**")
         for n in get_news(NEWS_FEEDS[tkr]["market"]):
             st.markdown(f"- [{n.title}]({n.link})")
-
         st.markdown("**Major Underlying Stocks**")
         for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
             st.markdown(f"- [{n.title}]({n.link})")
-
         st.divider()
 
 # ============================================================
-# ===================== PORTFOLIO TAB ========================
+# PORTFOLIO
 # ============================================================
 
 with tabs[2]:
-
     st.subheader("📁 Portfolio Control Panel")
 
     for t in etf_list:
-
         st.markdown(f"### {t}")
-
         c1, c2, c3 = st.columns(3)
-
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
                 "Shares", min_value=0, step=1,
                 value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
             )
-
         with c2:
             st.session_state.holdings[t]["div"] = st.number_input(
                 "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
                 value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
             )
-
         with c3:
             st.metric("Price", f"${prices[t]:.2f}")
 
         r = df[df.Ticker == t].iloc[0]
-        st.caption(
-            f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
-        )
-
+        st.caption(f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}")
         st.divider()
 
     st.subheader("💰 Cash Wallet")
-
-    st.number_input(
-        "Cash ($)",
-        min_value=0.0,
-        step=50.0,
-        key="cash"
-    )
-
+    st.number_input("Cash ($)", min_value=0.0, step=50.0, key="cash")
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ============================================================
-# ===================== SNAPSHOTS TAB ========================
+# SNAPSHOTS (FIXED)
 # ============================================================
 
 with tabs[3]:
@@ -282,34 +247,33 @@ with tabs[3]:
         st.success("Snapshot saved")
 
     files = sorted(os.listdir(SNAP_DIR))
+
     if files:
         snap = st.selectbox("Compare with snapshot:", files)
-
         snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
 
+        value_col = "Value ($)" if "Value ($)" in snap_df.columns else snap_df.columns[-1]
+
         comp = df[["Ticker", "Value ($)"]].merge(
-            snap_df[["Ticker", "Value ($)"]],
+            snap_df[["Ticker", value_col]],
             on="Ticker",
             suffixes=("_Now", "_Then")
         )
 
-        comp["Change ($)"] = comp["Value ($)_Now"] - comp["Value ($)_Then"]
+        comp["Change ($)"] = comp["Value ($)_Now"] - comp[f"{value_col}_Then"]
 
         st.dataframe(comp, use_container_width=True)
 
         hist_vals = []
         for f in files:
             d = pd.read_csv(os.path.join(SNAP_DIR, f))
-            hist_vals.append({
-                "Date": f.replace(".csv", ""),
-                "Total Value": d["Value ($)"].sum()
-            })
+            vcol = "Value ($)" if "Value ($)" in d.columns else d.columns[-1]
+            hist_vals.append({"Date": f.replace(".csv", ""), "Total Value": d[vcol].sum()})
 
         chart_df = pd.DataFrame(hist_vals)
 
         chart = alt.Chart(chart_df).mark_line(point=True).encode(
-            x="Date",
-            y="Total Value"
+            x="Date", y="Total Value"
         )
 
         st.altair_chart(chart, use_container_width=True)
@@ -317,4 +281,4 @@ with tabs[3]:
     else:
         st.info("No snapshots yet. Save your first snapshot above.")
 
-st.caption("v3.3 • Snapshot backtesting restored • Baseline preserved")
+st.caption("v3.4 • Snapshot KeyError fixed • Older snapshots supported • Baseline preserved")
