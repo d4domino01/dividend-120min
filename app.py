@@ -4,6 +4,7 @@ import feedparser
 import yfinance as yf
 import os
 from datetime import datetime
+import altair as alt
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -141,25 +142,58 @@ with tabs[0]:
 
     st.divider()
 
-    st.subheader("💥 ETF Signals")
+    view_mode = st.radio(
+        "View mode",
+        ["📈 Chart View", "📦 Card View"],
+        horizontal=True,
+        index=0
+    )
 
+    dash_rows = []
     for t in etf_list:
-
         r = df[df.Ticker == t].iloc[0]
-        w = r["Weekly Income ($)"]
+        dash_rows.append({
+            "Ticker": t,
+            "Weekly": r["Weekly Income ($)"],
+            "14d": impact_14d[t],
+            "28d": impact_28d[t],
+        })
 
-        c14 = "#22c55e" if impact_14d[t] >= 0 else "#ef4444"
-        c28 = "#22c55e" if impact_28d[t] >= 0 else "#ef4444"
+    dash_df = pd.DataFrame(dash_rows)
 
-        st.markdown(f"""
-        <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-        <b>{t}</b><br>
-        Weekly: ${w:.2f}<br><br>
-        <span style="color:{c14}">14d {impact_14d[t]:+.2f}</span> |
-        <span style="color:{c28}">28d {impact_28d[t]:+.2f}</span><br><br>
-        🟢 BUY / HOLD
-        </div>
-        """, unsafe_allow_html=True)
+    if view_mode == "📈 Chart View":
+
+        chart_df = dash_df.melt(id_vars="Ticker", value_vars=["14d", "28d"],
+                                 var_name="Period", value_name="Impact")
+
+        chart = alt.Chart(chart_df).mark_bar().encode(
+            x="Ticker",
+            y="Impact",
+            color=alt.condition(
+                alt.datum.Impact > 0,
+                alt.value("#22c55e"),
+                alt.value("#ef4444")
+            ),
+            column="Period"
+        ).properties(height=250)
+
+        st.altair_chart(chart, use_container_width=True)
+
+    else:
+
+        for _, row in dash_df.iterrows():
+            c14 = "#22c55e" if row["14d"] >= 0 else "#ef4444"
+            c28 = "#22c55e" if row["28d"] >= 0 else "#ef4444"
+
+            st.markdown(f"""
+            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
+            <b>{row['Ticker']}</b><br>
+            Weekly: ${row['Weekly']:.2f}<br><br>
+            <span style="color:{c14}">14d {row['14d']:+.2f}</span> |
+            <span style="color:{c28}">28d {row['28d']:+.2f}</span><br><br>
+            🟢 BUY / HOLD
+            </div>
+            """, unsafe_allow_html=True)
 
 # ============================================================
 # NEWS
@@ -221,7 +255,7 @@ with tabs[2]:
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ============================================================
-# SNAPSHOTS — CLEAN MODE
+# SNAPSHOTS
 # ============================================================
 
 with tabs[3]:
@@ -242,4 +276,4 @@ with tabs[3]:
     else:
         st.info("No snapshots yet.")
 
-st.caption("v3.6 • Dashboard restored • Wallet stable • Snapshot clean")
+st.caption("v3.7 • Dashboard chart/cards toggle restored • No other sections changed")
