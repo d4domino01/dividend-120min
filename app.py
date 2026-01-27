@@ -1,26 +1,26 @@
 import streamlit as st
 import pandas as pd
 import feedparser
+import yfinance as yf
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ---------------- BASE DATA ----------------
+# ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
-shares = {"QDTE":125, "CHPY":63, "XDTE":84}
+# ---------------- DEFAULT SESSION ----------------
+if "holdings" not in st.session_state:
+    st.session_state.holdings = {
+        "QDTE": {"shares": 125, "div": 0.177},
+        "CHPY": {"shares": 63, "div": 0.52},
+        "XDTE": {"shares": 84, "div": 0.16},
+    }
 
-weekly_div_per_share = {"QDTE":0.177, "CHPY":0.52, "XDTE":0.16}
+if "cash" not in st.session_state:
+    st.session_state.cash = 0.0
 
-prices = {"QDTE":31.21, "CHPY":61.19, "XDTE":40.19}
-
-impact_14d = {"QDTE":1.13, "CHPY":56.99, "XDTE":3.22}
-impact_28d = {"QDTE":26.50, "CHPY":307.36, "XDTE":30.08}
-
-signals = {"QDTE":"BUY / HOLD", "CHPY":"BUY / HOLD", "XDTE":"BUY / HOLD"}
-
-# ---------------- NEWS SOURCES ----------------
-
+# ---------------- NEWS FEEDS ----------------
 NEWS_FEEDS = {
     "QDTE": {
         "etf": "https://news.google.com/rss/search?q=weekly+income+etf+options+strategy+market",
@@ -45,27 +45,74 @@ def get_news(url, limit=5):
     except:
         return []
 
-# ---------------- CALCULATIONS ----------------
+# ---------------- DATA HELPERS ----------------
+@st.cache_data(ttl=600)
+def get_price(ticker):
+    try:
+        return round(yf.Ticker(ticker).history(period="5d")["Close"].iloc[-1], 2)
+    except:
+        return None
 
-weekly_income_map = {}
-total_value = 0.0
+# ---------------- BUILD LIVE DATA ----------------
+prices = {}
+for t in etf_list:
+    p = get_price(t)
+    prices[t] = p if p else 0.0
+
+# ---------------- CALCULATIONS ----------------
+rows = []
+total_value = st.session_state.cash
 total_weekly_income = 0.0
 
-for tkr in etf_list:
-    value = shares[tkr] * prices[tkr]
-    income = shares[tkr] * weekly_div_per_share[tkr]
+impact_14d = {}
+impact_28d = {}
+
+for t in etf_list:
+    h = st.session_state.holdings[t]
+    shares = h["shares"]
+    div = h["div"]
+    price = prices[t]
+
+    weekly_income = shares * div
+    monthly_income = weekly_income * 52 / 12
+    value = shares * price
 
     total_value += value
-    total_weekly_income += income
-    weekly_income_map[tkr] = income
+    total_weekly_income += weekly_income
 
-monthly_income = total_weekly_income * 4
+    # price impact
+    try:
+        hist = yf.Ticker(t).history(period="30d")
+        if len(hist) > 20:
+            now = hist["Close"].iloc[-1]
+            d14 = hist["Close"].iloc[-10]
+            d28 = hist["Close"].iloc[-20]
+            impact_14d[t] = round((now - d14) * shares, 2)
+            impact_28d[t] = round((now - d28) * shares, 2)
+        else:
+            impact_14d[t] = 0.0
+            impact_28d[t] = 0.0
+    except:
+        impact_14d[t] = 0.0
+        impact_28d[t] = 0.0
+
+    rows.append({
+        "Ticker": t,
+        "Shares": shares,
+        "Price ($)": price,
+        "Div / Share ($)": div,
+        "Weekly Income ($)": round(weekly_income, 2),
+        "Monthly Income ($)": round(monthly_income, 2),
+        "Value ($)": round(value, 2),
+    })
+
+df = pd.DataFrame(rows)
+
+monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
-
 market_signal = "BUY"
 
 # ---------------- HEADER ----------------
-
 st.title("📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
@@ -91,17 +138,17 @@ with tabs[0]:
 
     view_mode = st.radio("View mode", ["📦 Card View", "📋 Compact View"], horizontal=True)
 
-    dashboard_rows = []
-    for tkr in etf_list:
-        dashboard_rows.append({
-            "Ticker": tkr,
-            "Weekly ($)": round(weekly_income_map[tkr], 2),
-            "14d ($)": round(impact_14d[tkr], 2),
-            "28d ($)": round(impact_28d[tkr], 2),
-            "Signal": signals[tkr]
+    dash_rows = []
+    for _, r in df.iterrows():
+        dash_rows.append({
+            "Ticker": r["Ticker"],
+            "Weekly ($)": r["Weekly Income ($)"],
+            "14d ($)": impact_14d[r["Ticker"]],
+            "28d ($)": impact_28d[r["Ticker"]],
+            "Signal": "BUY / HOLD"
         })
 
-    dash_df = pd.DataFrame(dashboard_rows)
+    dash_df = pd.DataFrame(dash_rows)
 
     def color_pos_neg(val):
         if val > 0:
@@ -171,27 +218,44 @@ with tabs[1]:
 # ============================================================
 
 with tabs[2]:
-    st.subheader("📁 Portfolio")
 
-    rows = []
-    for tkr in etf_list:
-        rows.append({
-            "Ticker": tkr,
-            "Shares": shares[tkr],
-            "Price ($)": prices[tkr],
-            "Value ($)": round(shares[tkr] * prices[tkr], 2),
-            "Weekly Income ($)": round(weekly_income_map[tkr], 2)
-        })
+    st.subheader("📁 Portfolio Control Panel")
 
-    pf_df = pd.DataFrame(rows)
+    for t in etf_list:
 
-    pf_styled = pf_df.style.format({
-        "Price ($)": "${:,.2f}",
-        "Value ($)": "${:,.2f}",
-        "Weekly Income ($)": "${:,.2f}",
-    })
+        st.markdown(f"### {t}")
 
-    st.dataframe(pf_styled, use_container_width=True)
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares", min_value=0, step=1,
+                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
+            )
+
+        with c2:
+            st.session_state.holdings[t]["div"] = st.number_input(
+                "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
+                value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
+            )
+
+        with c3:
+            st.metric("Price", f"${prices[t]:.2f}")
+
+        r = df[df.Ticker == t].iloc[0]
+        st.caption(
+            f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
+        )
+
+        st.divider()
+
+    st.subheader("💰 Cash Wallet")
+    st.session_state.cash = st.number_input(
+        "Cash ($)", min_value=0.0, step=50.0,
+        value=float(st.session_state.cash)
+    )
+
+    st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ============================================================
 # ===================== SNAPSHOTS TAB ========================
@@ -199,6 +263,6 @@ with tabs[2]:
 
 with tabs[3]:
     st.subheader("📸 Snapshots")
-    st.info("Snapshot history + backtesting will be restored after strategy logic.")
+    st.info("Snapshot history + backtesting will be restored next.")
 
-st.caption("v3.0 • Dashboard stable • News grouped by ETF / market / stocks")
+st.caption("v3.1 • Portfolio drives dashboard • Live prices • Manual dividend control")
