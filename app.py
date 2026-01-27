@@ -1,271 +1,207 @@
 import streamlit as st
 import pandas as pd
-import feedparser
 import yfinance as yf
+import feedparser
+from datetime import datetime
+import os
 
-# ---------------- CONFIG ----------------
+# ================== CONFIG ==================
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ---------------- ETF LIST ----------------
-etf_list = ["QDTE", "CHPY", "XDTE"]
+# ================== DATA ==================
+ETFS = {
+    "QDTE": {"underlying": "QQQ", "stocks": ["AAPL", "MSFT", "NVDA"]},
+    "CHPY": {"underlying": "SOXX", "stocks": ["NVDA", "AMD", "TSM"]},
+    "XDTE": {"underlying": "SPY", "stocks": ["AAPL", "MSFT", "AMZN"]},
+}
 
-# ---------------- DEFAULT SESSION ----------------
+if "wallet" not in st.session_state:
+    st.session_state.wallet = 0.0
+
 if "holdings" not in st.session_state:
     st.session_state.holdings = {
-        "QDTE": {"shares": 125, "div": 0.177},
+        "QDTE": {"shares": 125, "div": 0.18},
         "CHPY": {"shares": 63, "div": 0.52},
         "XDTE": {"shares": 84, "div": 0.16},
     }
 
-if "cash" not in st.session_state:
-    st.session_state.cash = 0.0
+SNAP_DIR = "snapshots"
+os.makedirs(SNAP_DIR, exist_ok=True)
 
-# ---------------- NEWS FEEDS ----------------
-NEWS_FEEDS = {
-    "QDTE": {
-        "etf": "https://news.google.com/rss/search?q=weekly+income+etf+options+strategy+market",
-        "market": "https://news.google.com/rss/search?q=nasdaq+technology+stocks+market+news",
-        "stocks": "https://news.google.com/rss/search?q=NVDA+MSFT+AAPL+technology+stocks+news"
-    },
-    "CHPY": {
-        "etf": "https://news.google.com/rss/search?q=high+yield+income+etf+market",
-        "market": "https://news.google.com/rss/search?q=semiconductor+sector+SOXX+market+news",
-        "stocks": "https://news.google.com/rss/search?q=NVDA+AMD+INTC+semiconductor+stocks+news"
-    },
-    "XDTE": {
-        "etf": "https://news.google.com/rss/search?q=covered+call+etf+income+strategy+market",
-        "market": "https://news.google.com/rss/search?q=S%26P+500+market+news+stocks",
-        "stocks": "https://news.google.com/rss/search?q=AAPL+MSFT+GOOGL+US+stocks+market+news"
-    }
-}
-
-def get_news(url, limit=5):
+# ================== HELPERS ==================
+@st.cache_data(ttl=1800)
+def get_price(t):
     try:
-        return feedparser.parse(url).entries[:limit]
-    except:
-        return []
-
-# ---------------- DATA HELPERS ----------------
-@st.cache_data(ttl=600)
-def get_price(ticker):
-    try:
-        return round(yf.Ticker(ticker).history(period="5d")["Close"].iloc[-1], 2)
+        return float(yf.Ticker(t).fast_info["lastPrice"])
     except:
         return 0.0
 
-@st.cache_data(ttl=600)
-def get_hist(ticker):
-    try:
-        return yf.Ticker(ticker).history(period="30d")
-    except:
-        return None
+def rss(q):
+    return feedparser.parse(f"https://news.google.com/rss/search?q={q}+stock")
 
-# ---------------- LIVE PRICES ----------------
-prices = {t: get_price(t) for t in etf_list}
+# ================== NAV ==================
+tab = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# ---------------- HEADER ----------------
-st.title("📈 Income Strategy Engine")
-st.caption("Dividend Run-Up Monitor")
+# ================== DASHBOARD ==================
+with tab[0]:
+    st.header("📊 Overview")
 
-tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
+    prices = {t: get_price(t) for t in ETFS}
 
-# ============================================================
-# ===================== PORTFOLIO TAB ========================
-# ============================================================
+    total_value = 0
+    weekly_income = 0
 
-with tabs[2]:
+    for t in ETFS:
+        s = st.session_state.holdings[t]["shares"]
+        d = st.session_state.holdings[t]["div"]
+        total_value += s * prices[t]
+        weekly_income += s * d
 
-    st.subheader("📁 Portfolio Control Panel")
+    monthly_income = weekly_income * 4.33
+    annual_income = monthly_income * 12
 
-    for t in etf_list:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Value", f"${total_value + st.session_state.wallet:,.2f}")
+    c2.metric("Monthly Income", f"${monthly_income:,.2f}")
+    c3.metric("Annual Income", f"${annual_income:,.2f}")
+    c4.metric("Market", "🟢 BUY")
 
-        st.markdown(f"### {t}")
+    st.subheader("💥 ETF Signals")
 
-        c1, c2, c3 = st.columns(3)
+    for t in ETFS:
+        s = st.session_state.holdings[t]["shares"]
+        price = prices[t]
 
-        with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input(
-                "Shares", min_value=0, step=1,
-                value=int(st.session_state.holdings[t]["shares"]),
-                key=f"s_{t}"
-            )
+        hist = yf.download(t, period="2mo", interval="1d", progress=False)
+        if len(hist) > 30:
+            p14 = price - hist["Close"].iloc[-14]
+            p28 = price - hist["Close"].iloc[-28]
+        else:
+            p14 = p28 = 0
 
-        with c2:
-            st.session_state.holdings[t]["div"] = st.number_input(
-                "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
-                value=float(st.session_state.holdings[t]["div"]),
-                key=f"d_{t}"
-            )
+        c14 = "green" if p14 >= 0 else "red"
+        c28 = "green" if p28 >= 0 else "red"
 
-        with c3:
-            st.metric("Price", f"${prices[t]:.2f}")
+        weekly = st.session_state.holdings[t]["div"] * s
 
-        st.divider()
-
-    # ✅ CASH INPUT MOVED HERE (BEFORE CALCULATIONS)
-    st.subheader("💰 Cash Wallet")
-    st.session_state.cash = st.number_input(
-        "Cash ($)",
-        min_value=0.0,
-        step=50.0,
-        value=float(st.session_state.cash),
-        key="cash_input"
-    )
-
-# ============================================================
-# ================== CALCULATIONS (UNCHANGED) ================
-# ============================================================
-
-rows = []
-stock_value_total = 0.0
-total_weekly_income = 0.0
-
-impact_14d = {}
-impact_28d = {}
-
-for t in etf_list:
-    h = st.session_state.holdings[t]
-    shares = h["shares"]
-    div = h["div"]
-    price = prices[t]
-
-    weekly_income = shares * div
-    monthly_income = weekly_income * 52 / 12
-    value = shares * price
-
-    stock_value_total += value
-    total_weekly_income += weekly_income
-
-    hist = get_hist(t)
-    if hist is not None and len(hist) > 20:
-        now = hist["Close"].iloc[-1]
-        d14 = hist["Close"].iloc[-10]
-        d28 = hist["Close"].iloc[-20]
-        impact_14d[t] = round((now - d14) * shares, 2)
-        impact_28d[t] = round((now - d28) * shares, 2)
-    else:
-        impact_14d[t] = 0.0
-        impact_28d[t] = 0.0
-
-    rows.append({
-        "Ticker": t,
-        "Shares": shares,
-        "Price ($)": price,
-        "Div / Share ($)": div,
-        "Weekly Income ($)": round(weekly_income, 2),
-        "Monthly Income ($)": round(monthly_income, 2),
-        "Value ($)": round(value, 2),
-    })
-
-df = pd.DataFrame(rows)
-
-cash = float(st.session_state.cash)
-total_value = stock_value_total + cash
-monthly_income = total_weekly_income * 52 / 12
-annual_income = monthly_income * 12
-market_signal = "BUY"
-
-# ============================================================
-# ======================= DASHBOARD ==========================
-# ============================================================
-
-with tabs[0]:
-
-    st.subheader("📊 Overview")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Value (incl. cash)", f"${total_value:,.2f}")
-        st.metric("Annual Income", f"${annual_income:,.2f}")
-    with col2:
-        st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown(f"**Market:** 🟢 {market_signal}")
-
-    st.divider()
-
-    view_mode = st.radio("View mode", ["📦 Card View", "📋 Compact View"], horizontal=True)
-
-    dash_rows = []
-    for _, r in df.iterrows():
-        dash_rows.append({
-            "Ticker": r["Ticker"],
-            "Weekly ($)": r["Weekly Income ($)"],
-            "14d ($)": impact_14d[r["Ticker"]],
-            "28d ($)": impact_28d[r["Ticker"]],
-            "Signal": "BUY / HOLD"
-        })
-
-    dash_df = pd.DataFrame(dash_rows)
-
-    def color_pos_neg(val):
-        if val > 0:
-            return "color:#22c55e"
-        elif val < 0:
-            return "color:#ef4444"
-        return ""
-
-    if view_mode == "📋 Compact View":
-
-        styled = (
-            dash_df
-            .style
-            .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
-            .format({
-                "Weekly ($)": "${:,.2f}",
-                "14d ($)": "{:+,.2f}",
-                "28d ($)": "{:+,.2f}",
-            })
-        )
-        st.dataframe(styled, use_container_width=True)
-
-    else:
-
-        for _, row in dash_df.iterrows():
-            c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
-            c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
-
-            st.markdown(f"""
-            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-            <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly ($)']:.2f}<br><br>
-            <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br><br>
+        st.markdown(
+            f"""
+            <div style="padding:14px;border-radius:14px;background:#111827;margin-bottom:12px">
+            <b>{t}</b><br>
+            Weekly: ${weekly:.2f}<br>
+            <span style="color:{c14}">14d: {p14:+.2f}</span> |
+            <span style="color:{c28}">28d: {p28:+.2f}</span><br>
             🟢 BUY / HOLD
             </div>
-            """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
-# ============================================================
-# ========================= NEWS =============================
-# ============================================================
+# ================== NEWS ==================
+with tab[1]:
+    st.header("📰 ETF + Market News")
 
-with tabs[1]:
+    for t, v in ETFS.items():
+        st.subheader(t)
 
-    st.subheader("📰 ETF • Market • Stock News")
+        feeds = []
+        feeds += rss(t).entries[:2]
+        feeds += rss(v["underlying"]).entries[:2]
 
-    for tkr in etf_list:
+        for s in v["stocks"]:
+            feeds += rss(s).entries[:1]
 
-        st.markdown(f"### 🔹 {tkr}")
+        for e in feeds[:6]:
+            st.markdown(f"- [{e.title}]({e.link})")
 
-        st.markdown("**ETF / Strategy News**")
-        for n in get_news(NEWS_FEEDS[tkr]["etf"]):
-            st.markdown(f"- [{n.title}]({n.link})")
+# ================== PORTFOLIO ==================
+with tab[2]:
+    st.header("📁 Portfolio Control Panel")
 
-        st.markdown("**Underlying Market**")
-        for n in get_news(NEWS_FEEDS[tkr]["market"]):
-            st.markdown(f"- [{n.title}]({n.link})")
+    prices = {t: get_price(t) for t in ETFS}
 
-        st.markdown("**Major Underlying Stocks**")
-        for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
-            st.markdown(f"- [{n.title}]({n.link})")
+    total_stock = 0
+    total_weekly = 0
 
-        st.divider()
+    for t in ETFS:
+        st.subheader(t)
 
-# ============================================================
-# ===================== SNAPSHOTS TAB ========================
-# ============================================================
+        col1, col2 = st.columns(2)
 
-with tabs[3]:
-    st.subheader("📸 Snapshots")
-    st.info("Snapshot history + backtesting will be restored next.")
+        with col1:
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares", min_value=0, value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
+            )
 
-st.caption("v3.2.1 • ONLY wallet timing fix • no other changes")
+        with col2:
+            st.session_state.holdings[t]["div"] = st.number_input(
+                "Weekly Dividend / Share ($)",
+                min_value=0.0,
+                step=0.01,
+                format="%.2f",
+                value=st.session_state.holdings[t]["div"],
+                key=f"d_{t}",
+            )
+
+        value = st.session_state.holdings[t]["shares"] * prices[t]
+        weekly = st.session_state.holdings[t]["shares"] * st.session_state.holdings[t]["div"]
+
+        total_stock += value
+        total_weekly += weekly
+
+        st.write(f"Price: ${prices[t]:.2f}")
+        st.write(f"Value: ${value:,.2f}")
+        st.write(f"Weekly Income: ${weekly:.2f}")
+        st.write(f"Monthly Income: ${(weekly*4.33):.2f}")
+        st.write("---")
+
+    st.subheader("💼 Wallet")
+    st.session_state.wallet = st.number_input(
+        "Cash (€/$)", min_value=0.0, step=10.0, format="%.2f", value=st.session_state.wallet
+    )
+
+    st.subheader("📊 Portfolio Totals")
+
+    st.write(f"Stock Value: ${total_stock:,.2f}")
+    st.write(f"Wallet: ${st.session_state.wallet:,.2f}")
+    st.write(f"Total Portfolio: ${(total_stock + st.session_state.wallet):,.2f}")
+    st.write(f"Weekly Income: ${total_weekly:.2f}")
+    st.write(f"Monthly Income: ${(total_weekly*4.33):.2f}")
+    st.write(f"Annual Income: ${(total_weekly*4.33*12):.2f}")
+
+# ================== SNAPSHOTS ==================
+with tab[3]:
+    st.header("📸 Portfolio Snapshots")
+
+    if st.button("💾 Save Snapshot"):
+        prices = {t: get_price(t) for t in ETFS}
+        rows = []
+        for t in ETFS:
+            s = st.session_state.holdings[t]["shares"]
+            rows.append([t, s, prices[t], s * prices[t]])
+
+        df = pd.DataFrame(rows, columns=["Ticker", "Shares", "Price", "Value"])
+        name = datetime.now().strftime("%Y-%m-%d_%H-%M") + ".csv"
+        df.to_csv(os.path.join(SNAP_DIR, name), index=False)
+        st.success("Snapshot saved")
+
+    files = sorted(os.listdir(SNAP_DIR))
+    if files:
+        f = st.selectbox("Compare snapshot:", files)
+        old = pd.read_csv(os.path.join(SNAP_DIR, f))
+
+        prices = {t: get_price(t) for t in ETFS}
+        now = []
+        for t in ETFS:
+            s = st.session_state.holdings[t]["shares"]
+            now.append([t, s * prices[t]])
+
+        now_df = pd.DataFrame(now, columns=["Ticker", "Value_Now"])
+
+        comp = old.merge(now_df, on="Ticker")
+        comp["Change ($)"] = comp["Value_Now"] - comp["Value"]
+
+        st.dataframe(comp.style.format("{:.2f}"), use_container_width=True)
+
+        chart = comp[["Ticker", "Value", "Value_Now"]].set_index("Ticker")
+        st.line_chart(chart)
