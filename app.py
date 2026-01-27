@@ -3,22 +3,12 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 import os
-import numpy as np
-import altair as alt
 import feedparser
 
 # ================= CONFIG =================
 st.set_page_config(page_title="Income Strategy Engine", layout="centered")
 
 # ================= HELPERS =================
-
-def safe_float(x):
-    try:
-        if isinstance(x, str):
-            x = x.replace(",", ".")
-        return float(x)
-    except:
-        return 0.0
 
 def money(x):
     return f"${x:,.2f}"
@@ -104,7 +94,11 @@ for t in ETF_LIST:
     drawdown = get_drawdown(t)
 
     shares = st.session_state.holdings[t]["shares"]
-    manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
+    try:
+        manual_ps = float(str(st.session_state.holdings[t]["weekly_div_ps"]).replace(",", "."))
+    except:
+        manual_ps = 0.0
+
     div_ps = manual_ps if manual_ps > 0 else auto_ps
 
     weekly_income = div_ps * shares
@@ -115,8 +109,7 @@ for t in ETF_LIST:
     rows.append({
         "Ticker": t,
         "Shares": shares,
-        "Price": price,
-        "DivPS": round(div_ps, 4),
+        "Price": round(price, 2),
         "Weekly": round(weekly_income, 2),
         "Monthly": round(monthly, 2),
         "Value": round(value, 2),
@@ -152,7 +145,7 @@ with tab_dash:
     st.divider()
     st.markdown("#### 💥 ETF Value Impact vs Income")
 
-    impact = []
+    impact_rows = []
 
     for t in ETF_LIST:
         hist = get_hist(t)
@@ -165,22 +158,14 @@ with tab_dash:
         chg14 = round((now - d14) * shares, 2)
         chg28 = round((now - d28) * shares, 2)
 
-        impact.append({
+        impact_rows.append({
             "ETF": t,
             "Weekly Income ($)": round(df[df.Ticker == t]["Weekly"].iloc[0], 2),
-            "Value Change 14d ($)": chg14,
-            "Value Change 28d ($)": chg28
+            "14d Change ($)": f"{'🟢' if chg14>=0 else '🔴'} {chg14:.2f}",
+            "28d Change ($)": f"{'🟢' if chg28>=0 else '🔴'} {chg28:.2f}"
         })
 
-    impact_df = pd.DataFrame(impact)
-
-    def color_gain(val):
-        return f"color:{'green' if val>=0 else 'red'}"
-
-    styled = impact_df.style.applymap(color_gain, subset=["Value Change 14d ($)", "Value Change 28d ($)"])\
-                            .format("{:.2f}")
-
-    st.dataframe(styled, use_container_width=True)
+    st.dataframe(pd.DataFrame(impact_rows), use_container_width=True)
 
 # ================= NEWS =================
 
@@ -220,7 +205,6 @@ with tab_port:
 
         st.divider()
 
-    # ✅ FIXED WALLET — LIVE UPDATE
     st.session_state.cash = st.number_input(
         "💰 Cash Wallet ($)", min_value=0.0, step=50.0, value=float(st.session_state.cash)
     )
@@ -281,4 +265,4 @@ with tab_strat:
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly {money(r.Monthly)}")
 
-st.caption("v37 • Wallet live update • All features preserved")
+st.caption("v38 • Stable mobile UI • Colored ETF impact • Wallet live update")
