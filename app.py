@@ -307,12 +307,10 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
                 "Total Value": d["Value"].sum()
             })
 
-        chart_df = pd.DataFrame(hist_vals)
-
         chart = alt.Chart(chart_df).mark_line(point=True).encode(
-            x="Date",
-            y="Total Value"
-        )
+    x="Date",
+    y=alt.Y("Total Value", scale=alt.Scale(domain=[10000, 12000]))
+)
 
         st.markdown("#### 📈 Portfolio Value Over Time")
         st.altair_chart(chart, use_container_width=True)
