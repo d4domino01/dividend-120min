@@ -35,7 +35,6 @@ UNDERLYING_MAP = {
     "CHPY": "SOXX"
 }
 
-# ✅ Working Google News topic feeds
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
     "CHPY": "https://news.google.com/rss/search?q=semiconductor+industry+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -213,14 +212,12 @@ for t in ETF_LIST:
 
 st.dataframe(pd.DataFrame(impact), use_container_width=True)
 
-# ================= NEWS (CLICKABLE) =================
+# ================= NEWS =================
 
 with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
     for t in ETF_LIST:
-        st.markdown(f"#### 📌 {t} — Market News")
-
+        st.markdown(f"##### 📌 {t} — Market News")
         entries = get_rss(RSS_MAP.get(t, ""))
-
         if entries:
             for n in entries:
                 title = n.get("title", "Open article")
@@ -231,15 +228,13 @@ with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
                     st.write("•", title)
         else:
             st.info("No news feed available right now.")
-
         st.divider()
 
 # ================= PORTFOLIO =================
 
 with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
-        st.markdown(f"#### 📈 {t}")
-
+        st.markdown(f"##### 📈 {t}")
         c1, c2 = st.columns(2)
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
@@ -296,7 +291,7 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
         comp["Change ($)"] = comp["Value_Now"] - comp["Value_Then"]
 
-        st.markdown("#### 📊 ETF Value Comparison")
+        st.markdown("##### 📊 ETF Value Comparison")
         st.dataframe(comp, use_container_width=True)
 
         hist_vals = []
@@ -307,12 +302,14 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
                 "Total Value": d["Value"].sum()
             })
 
-        chart = alt.Chart(chart_df).mark_line(point=True).encode(
-    x="Date",
-    y=alt.Y("Total Value", scale=alt.Scale(domain=[10000, 12000]))
-)
+        chart_df = pd.DataFrame(hist_vals)
 
-        st.markdown("#### 📈 Portfolio Value Over Time")
+        chart = alt.Chart(chart_df).mark_line(point=True).encode(
+            x="Date",
+            y=alt.Y("Total Value", scale=alt.Scale(domain=[10000, 12000]))
+        )
+
+        st.markdown("##### 📈 Portfolio Value Over Time (Zoomed)")
         st.altair_chart(chart, use_container_width=True)
 
 # ================= WARNINGS =================
@@ -356,4 +353,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v21.2 • Clickable news links added • No features removed")
+st.caption("v21.3 • Smaller headers • Zoomed portfolio chart • No features removed")
