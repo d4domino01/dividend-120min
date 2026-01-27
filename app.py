@@ -1,209 +1,125 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
-import os
-import altair as alt
-import feedparser
-
-# ================= PAGE =================
-
-st.set_page_config(page_title="Income Strategy Engine", layout="wide")
-
-st.title("📈 Income Strategy Engine")
-st.caption("Dividend Run-Up Monitor")
+from datetime import datetime, timedelta
 
 # ================= CONFIG =================
+st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-ETF_LIST = ["QDTE", "CHPY", "XDTE"]
-DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
-UNDERLYING_MAP = {"QDTE": "QQQ", "XDTE": "SPY", "CHPY": "SOXX"}
+# ================= ETF LIST =================
+ETF_LIST = ["QDTE", "XDTE", "CHPY", "AIPI", "SPYI", "JEPQ", "ARCC", "MAIN", "KGLD", "VOO"]
 
-RSS_MAP = {
-    "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
-    "CHPY": "https://news.google.com/rss/search?q=semiconductor+industry+stocks+market&hl=en-US&gl=US&ceid=US:en",
-    "XDTE": "https://news.google.com/rss/search?q=S%26P+500+US+stock+market&hl=en-US&gl=US&ceid=US:en"
-}
-
-SNAP_DIR = "snapshots"
-os.makedirs(SNAP_DIR, exist_ok=True)
-
-# ================= SESSION =================
-
+# ================= SESSION STATE =================
 if "holdings" not in st.session_state:
-    st.session_state.holdings = {t: {"shares": DEFAULT_SHARES[t], "weekly_div_ps": ""} for t in ETF_LIST}
+    st.session_state.holdings = {
+        t: {"shares": 0, "weekly_div_ps": ""} for t in ETF_LIST
+    }
 
 if "cash" not in st.session_state:
-    st.session_state.cash = ""
+    st.session_state.cash = "0"
 
 # ================= HELPERS =================
 
-def safe_float(x):
-    try:
-        if isinstance(x, str):
-            x = x.replace(",", ".")
-        return float(x)
-    except:
-        return 0.0
-
-@st.cache_data(ttl=600)
-def get_hist(ticker, days=60):
-    try:
-        return yf.Ticker(ticker).history(period=f"{days}d")
-    except:
-        return None
-
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def get_price(ticker):
     try:
-        return round(yf.Ticker(ticker).history(period="5d")["Close"].iloc[-1], 2)
+        return round(yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1], 2)
     except:
         return None
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def get_auto_div_ps(ticker):
     try:
-        divs = yf.Ticker(ticker).dividends
-        if len(divs) == 0:
+        d = yf.Ticker(ticker).dividends
+        if len(d) == 0:
             return 0.0
-        return float(divs.iloc[-1])
+        recent = d[d.index > datetime.now() - timedelta(days=40)]
+        return round(recent.mean(), 4)
     except:
         return 0.0
 
-@st.cache_data(ttl=600)
-def get_trend(ticker):
+def safe_float(x):
     try:
-        df = yf.Ticker(ticker).history(period="1mo")
-        return "Up" if df["Close"].iloc[-1] > df["Close"].iloc[0] else "Down"
+        return float(str(x).replace(",", "."))
     except:
-        return "Unknown"
+        return 0.0
 
-@st.cache_data(ttl=600)
-def get_drawdown(ticker):
-    try:
-        df = yf.Ticker(ticker).history(period="1mo")
-        high = df["Close"].max()
-        last = df["Close"].iloc[-1]
-        return round((high - last) / high * 100, 2)
-    except:
-        return 0
+# ================= HEADER =================
+st.title("📈 Income Strategy Engine")
+st.caption("Dividend Run-Up Monitor")
 
-@st.cache_data(ttl=900)
-def get_rss(url):
-    try:
-        feed = feedparser.parse(url)
-        return feed.entries[:5]
-    except:
-        return []
-
-# ================= BUILD DATA =================
-
-rows = []
-
-for t in ETF_LIST:
-    price = get_price(t)
-    auto_ps = get_auto_div_ps(t)
-    trend = get_trend(t)
-    drawdown = get_drawdown(t)
-
-    shares = st.session_state.holdings[t]["shares"]
-    manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
-    div_ps = manual_ps if manual_ps > 0 else auto_ps
-
-    weekly_income = div_ps * shares
-    value = (price or 0) * shares
-
-    rows.append({
-        "Ticker": t,
-        "Shares": shares,
-        "Weekly Income": round(weekly_income, 2),
-        "Monthly Income": round(weekly_income * 52 / 12, 2),
-        "Annual Income": round(weekly_income * 52, 2),
-        "Value": round(value, 2),
-        "Trend": trend,
-        "Drawdown %": drawdown
-    })
-
-df = pd.DataFrame(rows)
-
-total_value = df["Value"].sum() + safe_float(st.session_state.cash)
-total_monthly = df["Monthly Income"].sum()
-total_annual = df["Annual Income"].sum()
-
-down = (df["Trend"] == "Down").sum()
-market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
-
-# ================= TABS =================
-
-tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📤 Snapshots", "📈 Strategy"])
+tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots", "🧠 Strategy"])
 
 # ================= DASHBOARD =================
-
 with tabs[0]:
 
     st.subheader("Overview")
 
+    total_value = 0
+    total_monthly = 0
+
+    for t in ETF_LIST:
+        price = get_price(t)
+        auto_ps = get_auto_div_ps(t)
+
+        shares = st.session_state.holdings[t]["shares"]
+        manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
+        div_ps = manual_ps if manual_ps > 0 else auto_ps
+
+        total_value += (price or 0) * shares
+        total_monthly += div_ps * shares * 52 / 12
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Value", f"${total_value:,.0f}")
     c2.metric("Monthly Income", f"${total_monthly:,.0f}")
-    c3.metric("Annual Income", f"${total_annual:,.0f}")
-    c4.metric("Market", market)
+    c3.metric("Annual Income", f"${total_monthly*12:,.0f}")
+
+    market_signal = "BUY" if total_monthly > 0 else "WATCH"
+    c4.metric("Market", market_signal)
 
     st.divider()
     st.subheader("💥 ETF Signals")
 
-    for t in ETF_LIST:
-        hist = get_hist(t)
+    cols = st.columns(2)
+    i = 0
+
+    for t in ETF_LIST[:3]:
+
+        price = get_price(t)
+        auto_ps = get_auto_div_ps(t)
         shares = st.session_state.holdings[t]["shares"]
 
-        if hist is not None and len(hist) > 25:
-            now = hist["Close"].iloc[-1]
-            d14 = hist["Close"].iloc[-10]
-            d28 = hist["Close"].iloc[-20]
-            chg14 = (now - d14) * shares
-            chg28 = (now - d28) * shares
-        else:
-            chg14 = chg28 = 0
+        weekly = auto_ps * shares
+        impact_14 = weekly * 2
+        impact_28 = weekly * 4
 
-        weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
+        signal = "BUY / HOLD" if impact_14 >= 0 else "WATCH"
 
-        if chg14 >= 0 and chg28 >= 0:
-            sig = "BUY / HOLD"
-        elif weekly >= abs(chg28):
-            sig = "WATCH"
-        else:
-            sig = "REDUCE"
-
-        st.markdown(f"### {t}")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Weekly Income", f"${weekly:.2f}")
-        c2.metric("14d Impact", f"${chg14:.2f}")
-        c3.metric("28d Impact", f"${chg28:.2f}")
-
-        if sig == "BUY / HOLD":
-            st.success(sig)
-        elif sig == "WATCH":
-            st.warning(sig)
-        else:
-            st.error(sig)
-
-        st.divider()
+        with cols[i % 2]:
+            with st.container(border=True):
+                st.markdown(f"### {t}")
+                st.write(f"Weekly: ${weekly:.2f}")
+                st.write(f"14d: ${impact_14:.2f} | 28d: ${impact_28:.2f}")
+                if "BUY" in signal:
+                    st.success(signal)
+                else:
+                    st.warning(signal)
+        i += 1
 
 # ================= NEWS =================
-
 with tabs[1]:
-    for t in ETF_LIST:
-        st.subheader(f"{t} — {UNDERLYING_MAP[t]}")
-        for n in get_rss(RSS_MAP[t]):
-            st.markdown(f"• [{n.title}]({n.link})")
-        st.divider()
+    st.subheader("ETF & Market News")
+    st.info("News feed placeholder — RSS can be added next.")
 
 # ================= PORTFOLIO =================
-
 with tabs[2]:
 
     for t in ETF_LIST:
         st.subheader(t)
+
+        price = get_price(t)
+        auto_ps = get_auto_div_ps(t)
+
         c1, c2 = st.columns(2)
 
         with c1:
@@ -214,93 +130,46 @@ with tabs[2]:
 
         with c2:
             st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
-                "Weekly Dividend / Share",
+                "Weekly Dividend / Share (leave blank = auto)",
                 st.session_state.holdings[t]["weekly_div_ps"], key=f"dps_{t}"
             )
 
-        r = df[df.Ticker == t].iloc[0]
-        st.caption(f"Value: ${r.Value:.2f} | Monthly: ${r['Monthly Income']:.2f}")
+        shares = st.session_state.holdings[t]["shares"]
+        manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
+        div_ps = manual_ps if manual_ps > 0 else auto_ps
+
+        value = (price or 0) * shares
+        monthly = div_ps * shares * 52 / 12
+
+        st.caption(
+            f"Price: ${price} | Auto Div/Share: ${auto_ps:.4f} | "
+            f"Value: ${value:.2f} | Monthly: ${monthly:.2f}"
+        )
+
         st.divider()
 
     st.session_state.cash = st.text_input("Cash Wallet ($)", value=str(st.session_state.cash))
 
 # ================= SNAPSHOTS =================
-
 with tabs[3]:
-
-    if st.button("💾 Save Snapshot"):
-        path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-        df.to_csv(path, index=False)
-        st.success("Snapshot saved")
-
-    files = sorted(os.listdir(SNAP_DIR))
-    if files:
-        snap = st.selectbox("Compare with:", files)
-
-        snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
-
-        comp = df[["Ticker", "Value"]].merge(
-            snap_df[["Ticker", "Value"]],
-            on="Ticker",
-            suffixes=("_Now", "_Then")
-        )
-        comp["Change ($)"] = comp["Value_Now"] - comp["Value_Then"]
-
-        st.dataframe(comp, use_container_width=True)
-
-        hist_vals = []
-        for f in files:
-            d = pd.read_csv(os.path.join(SNAP_DIR, f))
-            hist_vals.append({"Date": f.replace(".csv", ""), "Total": d["Value"].sum()})
-
-        chart_df = pd.DataFrame(hist_vals)
-
-        chart = alt.Chart(chart_df).mark_line(point=True).encode(
-            x="Date",
-            y="Total"
-        )
-
-        st.altair_chart(chart, use_container_width=True)
+    st.subheader("Portfolio Snapshots")
+    st.info("Snapshot export coming next version.")
 
 # ================= STRATEGY =================
-
 with tabs[4]:
 
     st.subheader("Strategy Mode — Dividend Run-Up / Income Stability")
 
-    st.write("• Focus on weekly & monthly income ETFs")
-    st.write("• Compare income vs short-term drawdowns")
-    st.write("• Avoid panic selling")
-    st.write("• Reinvest when trend + income align")
+    st.markdown("""
+- Focus on weekly & monthly income ETFs  
+- Compare income vs short-term drawdowns  
+- Avoid panic selling  
+- Reinvest when trend + income align  
 
-    st.divider()
+### Next upgrades
+- Momentum weighting  
+- Distribution change alerts  
+- Market regime detection  
+""")
 
-    st.subheader("Market Stress")
-    for t in ETF_LIST:
-        hist = get_hist(t, 10)
-        if hist is not None and len(hist) > 1:
-            move = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
-            st.write(f"{t}: {move:.2f}% daily move")
-
-    st.divider()
-
-    st.subheader("Optimizer")
-    ranked = df.sort_values("Trend", ascending=False)
-    for _, r in ranked.iterrows():
-        st.write(f"{r.Ticker} | Trend: {r.Trend}")
-
-    st.divider()
-
-    st.subheader("Rebalance Suggestions")
-    strongest = df[df.Trend == "Up"]
-    weakest = df[df.Trend == "Down"]
-    if len(strongest) > 0 and len(weakest) > 0:
-        st.warning(f"Consider trimming {weakest.iloc[0].Ticker} and adding to {strongest.iloc[0].Ticker}")
-    else:
-        st.success("No rebalance needed")
-
-    st.divider()
-
-    st.subheader("Income Outlook")
-    for _, r in df.iterrows():
-        st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
+    st.success("SAFE MODE — no HTML, all layout stable")
