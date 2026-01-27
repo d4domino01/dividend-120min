@@ -158,7 +158,7 @@ tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📤 Snapshots
 
 with tabs[0]:
 
-    st.subheader("Overview")
+    st.subheader("## Overview")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Value", f"${total_value:,.0f}")
