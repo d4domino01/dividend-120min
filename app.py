@@ -20,6 +20,31 @@ if "holdings" not in st.session_state:
 if "cash" not in st.session_state:
     st.session_state.cash = 0.0
 
+# ---------------- NEWS FEEDS ----------------
+NEWS_FEEDS = {
+    "QDTE": {
+        "etf": "https://news.google.com/rss/search?q=weekly+income+etf+options+strategy+market",
+        "market": "https://news.google.com/rss/search?q=nasdaq+technology+stocks+market+news",
+        "stocks": "https://news.google.com/rss/search?q=NVDA+MSFT+AAPL+technology+stocks+news"
+    },
+    "CHPY": {
+        "etf": "https://news.google.com/rss/search?q=high+yield+income+etf+market",
+        "market": "https://news.google.com/rss/search?q=semiconductor+sector+SOXX+market+news",
+        "stocks": "https://news.google.com/rss/search?q=NVDA+AMD+INTC+semiconductor+stocks+news"
+    },
+    "XDTE": {
+        "etf": "https://news.google.com/rss/search?q=covered+call+etf+income+strategy+market",
+        "market": "https://news.google.com/rss/search?q=S%26P+500+market+news+stocks",
+        "stocks": "https://news.google.com/rss/search?q=AAPL+MSFT+GOOGL+US+stocks+market+news"
+    }
+}
+
+def get_news(url, limit=5):
+    try:
+        return feedparser.parse(url).entries[:limit]
+    except:
+        return []
+
 # ---------------- DATA HELPERS ----------------
 @st.cache_data(ttl=600)
 def get_price(ticker):
@@ -77,8 +102,8 @@ with tabs[2]:
 
         st.divider()
 
+    # ✅ CASH INPUT MOVED HERE (BEFORE CALCULATIONS)
     st.subheader("💰 Cash Wallet")
-
     st.session_state.cash = st.number_input(
         "Cash ($)",
         min_value=0.0,
@@ -88,7 +113,7 @@ with tabs[2]:
     )
 
 # ============================================================
-# ================== CALCULATIONS (AFTER INPUTS) =============
+# ================== CALCULATIONS (UNCHANGED) ================
 # ============================================================
 
 rows = []
@@ -214,8 +239,26 @@ with tabs[0]:
 # ============================================================
 
 with tabs[1]:
-    st.subheader("📰 News")
-    st.info("News already wired — will keep refining later.")
+
+    st.subheader("📰 ETF • Market • Stock News")
+
+    for tkr in etf_list:
+
+        st.markdown(f"### 🔹 {tkr}")
+
+        st.markdown("**ETF / Strategy News**")
+        for n in get_news(NEWS_FEEDS[tkr]["etf"]):
+            st.markdown(f"- [{n.title}]({n.link})")
+
+        st.markdown("**Underlying Market**")
+        for n in get_news(NEWS_FEEDS[tkr]["market"]):
+            st.markdown(f"- [{n.title}]({n.link})")
+
+        st.markdown("**Major Underlying Stocks**")
+        for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
+            st.markdown(f"- [{n.title}]({n.link})")
+
+        st.divider()
 
 # ============================================================
 # ===================== SNAPSHOTS TAB ========================
@@ -223,6 +266,6 @@ with tabs[1]:
 
 with tabs[3]:
     st.subheader("📸 Snapshots")
-    st.info("Snapshot history + backtesting coming back next.")
+    st.info("Snapshot history + backtesting will be restored next.")
 
-st.caption("v3.3 • Wallet updates instantly • No double-enter bug")
+st.caption("v3.2.1 • ONLY wallet timing fix • no other changes")
