@@ -284,4 +284,4 @@ with tabs[4]:
     st.write("• Avoid panic selling during drawdowns")
     st.write("• Reinvest when income trend is stable")
 
-st.caption("v31 • All sections restored • Desktop & mobile stable • No features removed")
+st.caption("v31 • All sections restored • Desktop & mobile stable • No features removed") 
