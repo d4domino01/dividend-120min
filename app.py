@@ -11,8 +11,8 @@ st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
-# ---------------- SNAPSHOT DIR ----------------
-SNAP_DIR = "snapshots"
+# ---------------- SNAPSHOT DIR (V2 — ISOLATED) ----------------
+SNAP_DIR = "snapshots_v2"   # <<< NEW FOLDER — OLD snapshots/ IGNORED
 os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ---------------- DEFAULT SESSION ----------------
@@ -257,7 +257,7 @@ with tabs[2]:
 
 with tabs[3]:
 
-    st.subheader("📸 Portfolio Value Snapshots")
+    st.subheader("📸 Portfolio Value Snapshots (v2)")
 
     colA, colB = st.columns(2)
 
@@ -333,4 +333,4 @@ with tabs[3]:
         else:
             st.dataframe(stats_df, use_container_width=True)
 
-st.caption("v3.7 • Snapshot system stable • Dashboard preserved • No KeyErrors")
+st.caption("v3.8 • Snapshot v2 isolated • Old snapshot folder ignored • UI preserved")
