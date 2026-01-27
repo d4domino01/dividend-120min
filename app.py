@@ -5,8 +5,6 @@ import pandas as pd
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
 # ---------------- MOCK / BASE DATA ----------------
-# (replace later with live data if needed)
-
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
 shares = {
@@ -48,8 +46,8 @@ signals = {
 # ---------------- CALCULATIONS ----------------
 
 weekly_income_map = {}
-total_value = 0
-total_weekly_income = 0
+total_value = 0.0
+total_weekly_income = 0.0
 
 for tkr in etf_list:
     value = shares[tkr] * prices[tkr]
@@ -81,10 +79,10 @@ with tabs[0]:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Total Value", f"${total_value:,.0f}")
-        st.metric("Annual Income", f"${annual_income:,.0f}")
+        st.metric("Total Value", f"${total_value:,.2f}")
+        st.metric("Annual Income", f"${annual_income:,.2f}")
     with col2:
-        st.metric("Monthly Income", f"${monthly_income:,.0f}")
+        st.metric("Monthly Income", f"${monthly_income:,.2f}")
         st.markdown(
             f"**Market:** {'🟢 BUY' if market_signal == 'BUY' else '🟡 HOLD' if market_signal == 'HOLD' else '🔴 SELL'}"
         )
@@ -130,6 +128,11 @@ with tabs[0]:
             dash_df
             .style
             .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
+            .format({
+                "Weekly ($)": "${:,.2f}",
+                "14d ($)": "{:+,.2f}",
+                "28d ($)": "{:+,.2f}",
+            })
         )
 
         st.dataframe(styled, use_container_width=True)
@@ -170,7 +173,7 @@ with tabs[0]:
                 unsafe_allow_html=True
             )
 
-    st.caption("Dashboard v2 • Compact + Card views • Momentum colored")
+    st.caption("Dashboard v2 • Compact + Card views • Momentum colored • All $ formatted")
 
 # ============================================================
 # ======================= NEWS TAB ===========================
@@ -192,12 +195,22 @@ with tabs[2]:
         rows.append({
             "Ticker": tkr,
             "Shares": shares[tkr],
-            "Price": prices[tkr],
-            "Value": round(shares[tkr] * prices[tkr], 2),
-            "Weekly Income": round(weekly_income_map[tkr], 2)
+            "Price ($)": round(prices[tkr], 2),
+            "Value ($)": round(shares[tkr] * prices[tkr], 2),
+            "Weekly Income ($)": round(weekly_income_map[tkr], 2)
         })
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    pf_df = pd.DataFrame(rows)
+
+    pf_styled = (
+        pf_df.style.format({
+            "Price ($)": "${:,.2f}",
+            "Value ($)": "${:,.2f}",
+            "Weekly Income ($)": "${:,.2f}",
+        })
+    )
+
+    st.dataframe(pf_styled, use_container_width=True)
 
 # ============================================================
 # ===================== SNAPSHOTS TAB ========================
