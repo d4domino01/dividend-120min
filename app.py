@@ -2,18 +2,14 @@ import streamlit as st
 import pandas as pd
 import feedparser
 import yfinance as yf
-import os
 from datetime import datetime
-import altair as alt
+import os
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
-
-SNAP_DIR = "snapshots"
-os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ---------------- DEFAULT SESSION ----------------
 if "holdings" not in st.session_state:
@@ -60,7 +56,9 @@ def get_price(ticker):
         return 0.0
 
 # ---------------- BUILD LIVE DATA ----------------
-prices = {t: get_price(t) for t in etf_list}
+prices = {}
+for t in etf_list:
+    prices[t] = get_price(t)
 
 # ---------------- CALCULATIONS ----------------
 rows = []
@@ -101,8 +99,8 @@ for t in etf_list:
     rows.append({
         "Ticker": t,
         "Shares": shares,
-        "Price ($)": price,
-        "Div / Share ($)": div,
+        "Price ($)": round(price, 2),
+        "Div / Share ($)": round(div, 2),
         "Weekly Income ($)": round(weekly_income, 2),
         "Monthly Income ($)": round(monthly_income, 2),
         "Value ($)": round(value, 2),
@@ -110,11 +108,11 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
-# ---- TOTALS ----
+# ---- TOTALS (INCLUDE CASH) ----
 cash = float(st.session_state.cash)
-total_value = stock_value_total + cash
-monthly_income = total_weekly_income * 52 / 12
-annual_income = monthly_income * 12
+total_value = round(stock_value_total + cash, 2)
+monthly_income = round(total_weekly_income * 52 / 12, 2)
+annual_income = round(monthly_income * 12, 2)
 
 market_signal = "BUY"
 
@@ -125,7 +123,7 @@ st.caption("Dividend Run-Up Monitor")
 tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
 # ============================================================
-# DASHBOARD
+# ======================= DASHBOARD ==========================
 # ============================================================
 
 with tabs[0]:
@@ -138,91 +136,94 @@ with tabs[0]:
         st.metric("Annual Income", f"${annual_income:,.2f}")
     with col2:
         st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown(f"### 🟢 {market_signal}")
+        st.markdown("### 🟢 BUY")
 
     st.divider()
 
-    view_mode = st.radio(
-        "View mode",
-        ["📈 Chart View", "📦 Card View"],
-        horizontal=True,
-        index=0
-    )
-
-    dash_rows = []
+    # -------- ETF CARDS --------
     for t in etf_list:
-        r = df[df.Ticker == t].iloc[0]
-        dash_rows.append({
+
+        c14 = "#22c55e" if impact_14d[t] >= 0 else "#ef4444"
+        c28 = "#22c55e" if impact_28d[t] >= 0 else "#ef4444"
+
+        weekly = df[df.Ticker == t]["Weekly Income ($)"].values[0]
+
+        st.markdown(f"""
+        <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
+        <b>{t}</b><br>
+        Weekly: ${weekly:.2f}<br><br>
+        <span style="color:{c14}">14d {impact_14d[t]:+.2f}</span> |
+        <span style="color:{c28}">28d {impact_28d[t]:+.2f}</span><br><br>
+        🟢 BUY / HOLD
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # -------- TABLE VIEW (LIKE YOUR SCREENSHOTS) --------
+    st.subheader("💥 ETF Value Impact vs Income (per ETF)")
+
+    table_rows = []
+    for t in etf_list:
+        weekly = df[df.Ticker == t]["Weekly Income ($)"].values[0]
+        table_rows.append({
             "Ticker": t,
-            "Weekly": r["Weekly Income ($)"],
-            "14d": impact_14d[t],
-            "28d": impact_28d[t],
+            "Weekly Income ($)": round(weekly, 2),
+            "Value Change 14d ($)": round(impact_14d[t], 2),
+            "Value Change 28d ($)": round(impact_28d[t], 2),
+            "Signal": "HOLD"
         })
 
-    dash_df = pd.DataFrame(dash_rows)
+    table_df = pd.DataFrame(table_rows)
 
-    if view_mode == "📈 Chart View":
+    def color_pos_neg(val):
+        if isinstance(val, (int, float)):
+            if val > 0:
+                return "color:#22c55e"
+            elif val < 0:
+                return "color:#ef4444"
+        return ""
 
-        chart_df = dash_df.melt(
-            id_vars="Ticker",
-            value_vars=["14d", "28d"],
-            var_name="Period",
-            value_name="Impact"
-        )
+    styled_table = (
+        table_df.style
+        .applymap(color_pos_neg, subset=["Value Change 14d ($)", "Value Change 28d ($)"])
+        .format({
+            "Weekly Income ($)": "${:,.2f}",
+            "Value Change 14d ($)": "{:+,.2f}",
+            "Value Change 28d ($)": "{:+,.2f}",
+        })
+    )
 
-        chart = (
-            alt.Chart(chart_df)
-            .mark_line(point=True)
-            .encode(
-                x="Ticker:N",
-                y=alt.Y("Impact:Q", title="Value Change ($)"),
-                color=alt.Color(
-                    "Period:N",
-                    scale=alt.Scale(domain=["14d", "28d"], range=["#22c55e", "#60a5fa"])
-                ),
-            )
-            .properties(height=300)
-        )
-
-        st.altair_chart(chart, use_container_width=True)
-
-    else:
-
-        for _, row in dash_df.iterrows():
-            c14 = "#22c55e" if row["14d"] >= 0 else "#ef4444"
-            c28 = "#22c55e" if row["28d"] >= 0 else "#ef4444"
-
-            st.markdown(f"""
-            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-            <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly']:.2f}<br><br>
-            <span style="color:{c14}">14d {row['14d']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d']:+.2f}</span><br><br>
-            🟢 BUY / HOLD
-            </div>
-            """, unsafe_allow_html=True)
+    st.dataframe(styled_table, use_container_width=True)
 
 # ============================================================
-# NEWS
+# ========================= NEWS =============================
 # ============================================================
 
 with tabs[1]:
+
     st.subheader("📰 ETF • Market • Stock News")
+
     for tkr in etf_list:
+
         st.markdown(f"### 🔹 {tkr}")
+
         st.markdown("**ETF / Strategy News**")
         for n in get_news(NEWS_FEEDS[tkr]["etf"]):
             st.markdown(f"- [{n.title}]({n.link})")
+
         st.markdown("**Underlying Market**")
         for n in get_news(NEWS_FEEDS[tkr]["market"]):
             st.markdown(f"- [{n.title}]({n.link})")
+
         st.markdown("**Major Underlying Stocks**")
         for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
             st.markdown(f"- [{n.title}]({n.link})")
+
         st.divider()
 
 # ============================================================
-# PORTFOLIO
+# ===================== PORTFOLIO TAB ========================
 # ============================================================
 
 with tabs[2]:
@@ -258,29 +259,50 @@ with tabs[2]:
         st.divider()
 
     st.subheader("💰 Cash Wallet")
-    st.number_input("Cash ($)", min_value=0.0, step=50.0, key="cash")
+
+    st.session_state.cash = st.number_input(
+        "Cash ($)", min_value=0.0, step=50.0,
+        value=float(st.session_state.cash)
+    )
+
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ============================================================
-# SNAPSHOTS
+# ===================== SNAPSHOTS TAB ========================
 # ============================================================
+
+SNAP_DIR = "snapshots"
+os.makedirs(SNAP_DIR, exist_ok=True)
 
 with tabs[3]:
 
     st.subheader("📸 Portfolio Snapshots")
 
     if st.button("💾 Save Snapshot"):
-        filename = f"snapshot_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
-        df.to_csv(os.path.join(SNAP_DIR, filename), index=False)
-        st.success("Snapshot saved")
 
-    files = sorted(os.listdir(SNAP_DIR))
+        snap = df[["Ticker", "Value ($)"]].copy()
+        snap["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        fname = datetime.now().strftime("%Y-%m-%d_%H-%M") + ".csv"
+        snap.to_csv(os.path.join(SNAP_DIR, fname), index=False)
+        st.success(f"Snapshot saved: {fname}")
+
+    files = sorted(os.listdir(SNAP_DIR), reverse=True)
 
     if files:
-        selected = st.selectbox("View snapshot:", files)
-        snap_df = pd.read_csv(os.path.join(SNAP_DIR, selected))
-        st.dataframe(snap_df, use_container_width=True)
-    else:
-        st.info("No snapshots yet.")
+        sel = st.selectbox("Compare snapshot:", files)
 
-st.caption("v3.8 • Line chart restored • Cards toggle preserved • All other tabs unchanged")
+        snap_df = pd.read_csv(os.path.join(SNAP_DIR, sel))
+
+        comp = pd.merge(
+            df[["Ticker", "Value ($)"]],
+            snap_df[["Ticker", "Value ($)"]],
+            on="Ticker",
+            suffixes=("_Now", "_Then")
+        )
+
+        comp["Change ($)"] = (comp["Value ($)_Now"] - comp["Value ($)_Then"]).round(2)
+
+        st.dataframe(comp, use_container_width=True)
+
+st.caption("v36 • Dashboard cards + table restored • Wallet stable • Layout preserved")
