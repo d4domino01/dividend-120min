@@ -2,11 +2,14 @@ import streamlit as st
 import pandas as pd
 import feedparser
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
+
+SNAP_DIR = "snapshots"
+os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
@@ -55,13 +58,6 @@ def get_price(ticker):
     except:
         return 0.0
 
-@st.cache_data(ttl=600)
-def get_hist(ticker, days=60):
-    try:
-        return yf.Ticker(ticker).history(period=f"{days}d")
-    except:
-        return pd.DataFrame()
-
 # ---------------- BUILD LIVE DATA ----------------
 prices = {t: get_price(t) for t in etf_list}
 
@@ -69,6 +65,7 @@ prices = {t: get_price(t) for t in etf_list}
 rows = []
 stock_value_total = 0.0
 total_weekly_income = 0.0
+
 impact_14d = {}
 impact_28d = {}
 
@@ -85,14 +82,18 @@ for t in etf_list:
     stock_value_total += value
     total_weekly_income += weekly_income
 
-    hist = get_hist(t, 30)
-    if len(hist) >= 20:
-        now = hist["Close"].iloc[-1]
-        d14 = hist["Close"].iloc[-10]
-        d28 = hist["Close"].iloc[-20]
-        impact_14d[t] = round((now - d14) * shares, 2)
-        impact_28d[t] = round((now - d28) * shares, 2)
-    else:
+    try:
+        hist = yf.Ticker(t).history(period="30d")
+        if len(hist) > 20:
+            now = hist["Close"].iloc[-1]
+            d14 = hist["Close"].iloc[-10]
+            d28 = hist["Close"].iloc[-20]
+            impact_14d[t] = round((now - d14) * shares, 2)
+            impact_28d[t] = round((now - d28) * shares, 2)
+        else:
+            impact_14d[t] = 0.0
+            impact_28d[t] = 0.0
+    except:
         impact_14d[t] = 0.0
         impact_28d[t] = 0.0
 
@@ -108,17 +109,18 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
-# ---- TOTALS ----
 cash = float(st.session_state.cash)
 total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
 
+market_signal = "BUY"
+
 # ---------------- HEADER ----------------
 st.title("📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
-tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio", "📸 Snapshots"])
+tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
 # ============================================================
 # ======================= DASHBOARD ==========================
@@ -134,11 +136,11 @@ with tabs[0]:
         st.metric("Annual Income", f"${annual_income:,.2f}")
     with col2:
         st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown("**Market:** 🟢 BUY")
+        st.markdown(f"**Market:** 🟢 {market_signal}")
 
     st.divider()
 
-    show_table_only = st.toggle("Table only view", value=False)
+    show_table_only = st.toggle("Show table only", value=False)
 
     dash_rows = []
     for _, r in df.iterrows():
@@ -177,125 +179,41 @@ with tabs[0]:
     )
 
 # ============================================================
-# ======================= STRATEGY TAB =======================
+# ========================= NEWS =============================
 # ============================================================
 
 with tabs[1]:
 
-    st.subheader("🧠 Strategy Engine")
-
-    # ---- MARKET REGIME ----
-    avg_impact = sum(impact_28d.values())
-    if avg_impact > 0:
-        regime = "🟢 BUY"
-    elif avg_impact > -100:
-        regime = "🟡 HOLD"
-    else:
-        regime = "🔴 RISK"
-
-    st.markdown(f"### Market Regime: {regime}")
-    st.caption("Based on 28-day value impact across holdings")
-
-    st.divider()
-
-    # ---- ETF SIGNAL ENGINE ----
-    st.markdown("### 📊 ETF Signals")
-
-    sig_rows = []
-    for t in etf_list:
-        trend = impact_28d[t]
-        signal = "BUY" if trend > 0 else "HOLD"
-        sig_rows.append({
-            "Ticker": t,
-            "14d ($)": impact_14d[t],
-            "28d ($)": impact_28d[t],
-            "Signal": signal
-        })
-
-    st.dataframe(pd.DataFrame(sig_rows), use_container_width=True)
-
-    st.divider()
-
-    # ---- INCOME TARGET PLANNER ----
-    st.markdown("### 🎯 Income Target Planner")
-
-    target = st.number_input("Target Monthly Income ($)", value=1000, step=100)
-
-    gap = max(0, target - monthly_income)
-    growth_per_year = monthly_income * 0.15
-
-    if growth_per_year > 0:
-        years = gap / (growth_per_year / 12) / 12
-    else:
-        years = 0
-
-    st.metric("Current Monthly Income", f"${monthly_income:,.2f}")
-    st.metric("Income Gap", f"${gap:,.2f}")
-    st.metric("Est. Years to Target", f"{years:.1f} yrs")
-
-    st.divider()
-
-    # ---- 1–6 YEAR PROJECTION ----
-    st.markdown("### 📈 1–6 Year Income Projection")
-
-    proj = []
-    val = total_value
-    inc = monthly_income
-
-    for y in range(1, 7):
-        val *= 1.12
-        inc *= 1.12
-        proj.append({
-            "Year": y,
-            "Portfolio ($)": round(val, 2),
-            "Monthly Income ($)": round(inc, 2),
-            "Annual Income ($)": round(inc * 12, 2)
-        })
-
-    proj_df = pd.DataFrame(proj)
-    st.dataframe(proj_df, use_container_width=True)
-    st.line_chart(proj_df.set_index("Year")[["Monthly Income ($)"]])
-
-    st.divider()
-
-    # ---- ALLOCATION SUGGESTION ----
-    st.markdown("### 💡 Buy Suggestion (Whole Shares Only)")
-
-    best = max(etf_list, key=lambda x: impact_28d[x])
-    price = prices[best]
-
-    if price > 0:
-        shares = int(cash // price)
-    else:
-        shares = 0
-
-    if shares > 0:
-        st.success(f"Buy **{shares} shares of {best}** with available cash.")
-    else:
-        st.info("Not enough cash for whole-share purchase.")
-
-# ============================================================
-# ========================= NEWS =============================
-# ============================================================
-
-with tabs[2]:
     st.subheader("📰 ETF • Market • Stock News")
+
     for tkr in etf_list:
         st.markdown(f"### 🔹 {tkr}")
-        for sec in ["etf", "market", "stocks"]:
-            for n in get_news(NEWS_FEEDS[tkr][sec]):
-                st.markdown(f"- [{n.title}]({n.link})")
+
+        st.markdown("**ETF / Strategy News**")
+        for n in get_news(NEWS_FEEDS[tkr]["etf"]):
+            st.markdown(f"- [{n.title}]({n.link})")
+
+        st.markdown("**Underlying Market**")
+        for n in get_news(NEWS_FEEDS[tkr]["market"]):
+            st.markdown(f"- [{n.title}]({n.link})")
+
+        st.markdown("**Major Underlying Stocks**")
+        for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
+            st.markdown(f"- [{n.title}]({n.link})")
+
         st.divider()
 
 # ============================================================
 # ===================== PORTFOLIO TAB ========================
 # ============================================================
 
-with tabs[3]:
+with tabs[2]:
+
     st.subheader("📁 Portfolio Control Panel")
 
     for t in etf_list:
         st.markdown(f"### {t}")
+
         c1, c2, c3 = st.columns(3)
 
         with c1:
@@ -332,35 +250,47 @@ with tabs[3]:
 # ===================== SNAPSHOTS TAB ========================
 # ============================================================
 
-SNAP_DIR = "snapshots"
-os.makedirs(SNAP_DIR, exist_ok=True)
+with tabs[3]:
 
-with tabs[4]:
     st.subheader("📸 Portfolio Value Snapshots")
 
-    if st.button("🧹 Delete ALL Snapshots"):
-        for f in os.listdir(SNAP_DIR):
-            os.remove(os.path.join(SNAP_DIR, f))
-        st.success("All snapshots deleted.")
+    colA, colB = st.columns(2)
 
-    if st.button("💾 Save Snapshot"):
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        df_snap = pd.DataFrame([{
-            "timestamp": ts,
-            "total_value": round(total_value, 2)
-        }])
-        df_snap.to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
-        st.success("Snapshot saved.")
+    with colA:
+        if st.button("💾 Save Snapshot"):
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            snap = pd.DataFrame([{
+                "timestamp": ts,
+                "total_value": round(total_value, 2)
+            }])
+            fname = f"{SNAP_DIR}/snap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            snap.to_csv(fname, index=False)
+            st.success("Snapshot saved.")
+
+    with colB:
+        if st.button("🧹 Delete ALL Snapshots"):
+            for f in os.listdir(SNAP_DIR):
+                os.remove(os.path.join(SNAP_DIR, f))
+            st.success("All snapshots deleted.")
 
     files = sorted(os.listdir(SNAP_DIR))
-    if files:
-        hist = []
-        for f in files:
-            d = pd.read_csv(f"{SNAP_DIR}/{f}")
-            hist.append(d.iloc[0])
-        hist_df = pd.DataFrame(hist)
-        st.line_chart(hist_df.set_index("timestamp")["total_value"])
-    else:
-        st.info("No snapshots yet.")
 
-st.caption("vFinal • Strategy restored • No features removed")
+    if files:
+        all_snaps = []
+        for f in files:
+            df_s = pd.read_csv(os.path.join(SNAP_DIR, f))
+            all_snaps.append(df_s)
+
+        hist_df = pd.concat(all_snaps, ignore_index=True)
+        hist_df["timestamp"] = pd.to_datetime(hist_df["timestamp"])
+
+        st.subheader("📈 Portfolio Value Over Time")
+        st.line_chart(hist_df.set_index("timestamp")["total_value"])
+
+        st.subheader("📋 Snapshot History")
+        st.dataframe(hist_df.sort_values("timestamp", ascending=False), use_container_width=True)
+
+    else:
+        st.info("No snapshots saved yet.")
+
+st.caption("v3.7 • Snapshot system hardened • Dashboard + Wallet stable")
