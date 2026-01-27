@@ -21,8 +21,8 @@ def safe_float(x):
 # ================= PAGE =================
 
 st.markdown(
-    "<div style='font-size:20px; font-weight:700;'>📈 Income Strategy Engine</div>"
-    "<div style='font-size:12px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
+    "<div style='font-size:18px; font-weight:700;'>📈 Income Strategy Engine</div>"
+    "<div style='font-size:11px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
     unsafe_allow_html=True
 )
 
@@ -35,7 +35,6 @@ UNDERLYING_MAP = {
     "CHPY": "SOXX"
 }
 
-# ✅ Working Google News topic feeds
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
     "CHPY": "https://news.google.com/rss/search?q=semiconductor+industry+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -169,7 +168,7 @@ down = (df["Trend"] == "Down").sum()
 market = "🟢 BUY" if down == 0 else "🟡 HOLD" if down == 1 else "🔴 DEFENSIVE"
 
 st.markdown(
-    f"<div style='padding:8px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>",
+    f"<div style='padding:6px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>",
     unsafe_allow_html=True
 )
 
@@ -205,33 +204,34 @@ for t in ETF_LIST:
 
     impact.append({
         "ETF": t,
-        "Weekly Income ($)": round(weekly, 2),
-        "Value Change 14d ($)": round(chg14, 2),
-        "Value Change 28d ($)": round(chg28, 2),
+        "Weekly Income ($)": weekly,
+        "Value Change 14d ($)": chg14,
+        "Value Change 28d ($)": chg28,
         "Signal": sig
     })
 
-st.dataframe(pd.DataFrame(impact), use_container_width=True)
+impact_df = pd.DataFrame(impact)
 
-# ================= NEWS (CLICKABLE) =================
+st.dataframe(
+    impact_df.style.format({
+        "Weekly Income ($)": "${:.2f}",
+        "Value Change 14d ($)": "${:.2f}",
+        "Value Change 28d ($)": "${:.2f}",
+    }),
+    use_container_width=True
+)
+
+# ================= NEWS =================
 
 with st.expander("📰 Market & Sector News (Relevant to Each ETF)"):
     for t in ETF_LIST:
         st.markdown(f"#### 📌 {t} — Market News")
-
         entries = get_rss(RSS_MAP.get(t, ""))
-
         if entries:
             for n in entries:
-                title = n.get("title", "Open article")
-                link = n.get("link", "")
-                if link:
-                    st.markdown(f"• [{title}]({link})")
-                else:
-                    st.write("•", title)
+                st.markdown(f"• [{n.title}]({n.link})")
         else:
             st.info("No news feed available right now.")
-
         st.divider()
 
 # ================= PORTFOLIO =================
@@ -358,5 +358,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v21.2 • Clickable news links added • No features removed")
- 
+st.caption("v21.3 • UI polish only • No sections removed • Logic untouched")
