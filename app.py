@@ -23,7 +23,19 @@ def safe_float(x):
 st.markdown("""
 <style>
 .card {background:#111;padding:12px;border-radius:14px;margin-bottom:10px;}
-.kpi {background:#161616;padding:10px;border-radius:14px;text-align:center;margin-bottom:6px;}
+
+.kpi-grid{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.kpi{
+  background:#161616;
+  padding:12px;
+  border-radius:14px;
+  text-align:center;
+  width:48%;
+}
 .kpi h2{margin:0;font-size:22px;}
 .kpi p{margin:0;opacity:.7;font-size:12px;}
 
@@ -160,13 +172,14 @@ market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
 
 # ================= KPI GRID =================
 
-c1, c2 = st.columns(2)
-c3, c4 = st.columns(2)
-
-with c1: st.markdown(f"<div class='kpi'><p>Total Value</p><h2>${total_value:,.0f}</h2></div>", unsafe_allow_html=True)
-with c2: st.markdown(f"<div class='kpi'><p>Monthly Income</p><h2>${total_monthly_income:,.0f}</h2></div>", unsafe_allow_html=True)
-with c3: st.markdown(f"<div class='kpi'><p>Annual Income</p><h2>${total_annual_income:,.0f}</h2></div>", unsafe_allow_html=True)
-with c4: st.markdown(f"<div class='kpi'><p>Market</p><h2>{market}</h2></div>", unsafe_allow_html=True)
+st.markdown(f"""
+<div class="kpi-grid">
+  <div class="kpi"><p>Total Value</p><h2>${total_value:,.0f}</h2></div>
+  <div class="kpi"><p>Monthly Income</p><h2>${total_monthly_income:,.0f}</h2></div>
+  <div class="kpi"><p>Annual Income</p><h2>${total_annual_income:,.0f}</h2></div>
+  <div class="kpi"><p>Market</p><h2>{market}</h2></div>
+</div>
+""", unsafe_allow_html=True)
 
 # ================= TABS =================
 
@@ -249,6 +262,19 @@ with tab4:
         comp["Change ($)"] = comp["Value_Now"]-comp["Value_Then"]
         st.dataframe(comp,use_container_width=True)
 
+        hist_vals=[]
+        for f in files:
+            d=pd.read_csv(os.path.join(SNAP_DIR,f))
+            hist_vals.append({"Date":f.replace(".csv",""),"Total Value":d["Value"].sum()})
+        chart_df=pd.DataFrame(hist_vals)
+
+        chart=alt.Chart(chart_df).mark_line(point=True).encode(
+            x="Date",
+            y=alt.Y("Total Value", scale=alt.Scale(domain=[10000,12000]))
+        )
+        st.markdown("##### 📈 Portfolio Value Over Time (Zoomed)")
+        st.altair_chart(chart, use_container_width=True)
+
 # ---------- RISK & STRATEGY ----------
 
 with tab5:
@@ -261,4 +287,4 @@ with tab5:
     for _, r in ranked.iterrows():
         st.write(f"{r.Ticker} | Trend {r.Trend}")
 
-st.caption("v23.1 • KPI 2x2 grid • Signal dots • ETF cards • Tabs • No features removed")
+st.caption("v23.2 • Mobile KPI grid • Signal dots restored • Snapshot chart restored • No features removed")
