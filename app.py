@@ -29,8 +29,6 @@ st.markdown(
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
-UNDERLYING_MAP = {"QDTE":"QQQ","XDTE":"SPY","CHPY":"SOXX"}
-
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
     "CHPY": "https://news.google.com/rss/search?q=semiconductor+industry+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -123,10 +121,9 @@ def get_rss(url):
     except:
         return []
 
-# ================= BUILD TABLE =================
+# ================= BUILD DATA =================
 
 rows = []
-
 for t in ETF_LIST:
     price = get_price(t)
     auto_ps = get_auto_div_ps(t)
@@ -143,9 +140,6 @@ for t in ETF_LIST:
 
     rows.append({
         "Ticker": t,
-        "Shares": shares,
-        "Price": price,
-        "Div / Share": round(div_ps,4),
         "Weekly Income": round(weekly_income,2),
         "Monthly Income": round(monthly,2),
         "Value": round(value,2),
@@ -170,59 +164,59 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard","📰 News","📁 Portfolio",
 
 with tab1:
 
-    c1,c2 = st.columns(2)
-    c3,c4 = st.columns(2)
+    r1c1, r1c2 = st.columns(2)
+    r2c1, r2c2 = st.columns(2)
 
-    with c1: st.metric("Total Value", f"${total_value:,.0f}")
-    with c2: st.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-    with c3: st.metric("Annual Income", f"${total_annual_income:,.0f}")
-    with c4: st.metric("Market", market)
+    r1c1.metric("Total Value", f"${total_value:,.0f}")
+    r1c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
+    r2c1.metric("Annual Income", f"${total_annual_income:,.0f}")
+    r2c2.metric("Market", market)
 
     st.markdown("### 💥 ETF Signals")
 
-    grid = st.columns(2)
+    pairs = [ETF_LIST[i:i+2] for i in range(0, len(ETF_LIST), 2)]
 
-    i = 0
-    for t in ETF_LIST:
+    for pair in pairs:
+        cols = st.columns(2)
 
-        hist = get_hist(t)
-        shares = st.session_state.holdings[t]["shares"]
+        for idx, t in enumerate(pair):
 
-        if hist is not None and len(hist)>25:
-            now = hist["Close"].iloc[-1]
-            d14 = hist["Close"].iloc[-10]
-            d28 = hist["Close"].iloc[-20]
-            chg14 = (now-d14)*shares
-            chg28 = (now-d28)*shares
-        else:
-            chg14=chg28=0
+            hist = get_hist(t)
+            shares = st.session_state.holdings[t]["shares"]
 
-        weekly = df[df.Ticker==t]["Weekly Income"].iloc[0]
+            if hist is not None and len(hist) > 25:
+                now = hist["Close"].iloc[-1]
+                d14 = hist["Close"].iloc[-10]
+                d28 = hist["Close"].iloc[-20]
+                chg14 = (now - d14) * shares
+                chg28 = (now - d28) * shares
+            else:
+                chg14 = chg28 = 0
 
-        if chg14>=0 and chg28>=0:
-            sig="🟢 BUY / HOLD"
-        elif weekly>=abs(chg28) or weekly>=abs(chg14):
-            sig="🟡 WATCH"
-        else:
-            sig="🔴 REDUCE"
+            weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
 
-        with grid[i%2]:
-            st.markdown(f"""
-            <div style="
-                background:#111;
-                border-radius:14px;
-                padding:12px;
-                margin-bottom:10px;
-                box-shadow:0 0 10px rgba(0,0,0,0.4);
-            ">
-            <b>{t}</b><br>
-            Weekly: ${weekly:.2f}<br>
-            14d: ${chg14:.2f} | 28d: ${chg28:.2f}<br>
-            <b>{sig}</b>
-            </div>
-            """, unsafe_allow_html=True)
+            if chg14 >= 0 and chg28 >= 0:
+                sig = "🟢 BUY / HOLD"
+            elif weekly >= abs(chg28) or weekly >= abs(chg14):
+                sig = "🟡 WATCH"
+            else:
+                sig = "🔴 REDUCE"
 
-        i += 1
+            with cols[idx]:
+                st.markdown(f"""
+                <div style="
+                    background:#111;
+                    border-radius:14px;
+                    padding:12px;
+                    margin-bottom:12px;
+                    box-shadow:0 0 10px rgba(0,0,0,0.4);
+                ">
+                <b>{t}</b><br>
+                Weekly: ${weekly:.2f}<br>
+                14d: ${chg14:.2f} | 28d: ${chg28:.2f}<br>
+                <b>{sig}</b>
+                </div>
+                """, unsafe_allow_html=True)
 
 # ================= NEWS =================
 
@@ -254,7 +248,6 @@ with tab3:
                 "Weekly Div / Share ($)",value=str(st.session_state.holdings[t]["weekly_div_ps"]),key=f"dps_{t}")
 
         r = df[df.Ticker==t].iloc[0]
-        st.caption(f"Price: ${r.Price} | Div/Share: {r['Div / Share']} | Drawdown: {r['Drawdown %']}%")
         st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
         st.divider()
 
@@ -276,13 +269,10 @@ with tab4:
         snap = st.selectbox("Compare with snapshot:",files)
 
         snap_df = pd.read_csv(os.path.join(SNAP_DIR,snap))
-        comp = df[["Ticker","Value"]].merge(
-            snap_df[["Ticker","Value"]],
-            on="Ticker",suffixes=("_Now","_Then")
-        )
-        comp["Change ($)"] = comp["Value_Now"]-comp["Value_Then"]
+        comp = df.merge(snap_df, on="Ticker", suffixes=("_Now","_Then"))
+        comp["Change ($)"] = comp["Value_Now"] - comp["Value_Then"]
 
-        st.dataframe(comp,use_container_width=True)
+        st.dataframe(comp[["Ticker","Value_Now","Value_Then","Change ($)"]],use_container_width=True)
 
         hist_vals=[]
         for f in files:
@@ -298,4 +288,4 @@ with tab4:
 
         st.altair_chart(chart,use_container_width=True)
 
-st.caption("v23.4 • KPI grid • ETF signal cards • Emoji dots • Tabs • Snapshot chart • No features removed")
+st.caption("v23.6 • TRUE 2-column ETF cards • KPI grid • Tabs • Snapshot chart • No features removed")
