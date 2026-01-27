@@ -20,6 +20,25 @@ def safe_float(x):
 
 # ================= PAGE =================
 
+st.markdown("""
+<style>
+.card {
+    background-color:#111;
+    padding:14px;
+    border-radius:12px;
+    margin-bottom:10px;
+}
+.kpi {
+    background-color:#161616;
+    padding:14px;
+    border-radius:14px;
+    text-align:center;
+}
+.kpi h2 { margin:0; font-size:22px; }
+.kpi p { margin:0; opacity:0.7; font-size:12px; }
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown(
     "<div style='font-size:22px; font-weight:700;'>📈 Income Strategy Engine</div>"
     "<div style='font-size:13px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
@@ -29,11 +48,7 @@ st.markdown(
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
 
-UNDERLYING_MAP = {
-    "QDTE": "QQQ",
-    "XDTE": "SPY",
-    "CHPY": "SOXX"
-}
+UNDERLYING_MAP = {"QDTE": "QQQ", "XDTE": "SPY", "CHPY": "SOXX"}
 
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -162,18 +177,29 @@ for t in ETF_LIST:
 
 df = pd.DataFrame(rows)
 
-# ================= MARKET CONDITION =================
-
+total_value = df["Value"].sum() + safe_float(st.session_state.cash)
+total_annual_income = df["Weekly Income"].sum() * 52
+total_monthly_income = total_annual_income / 12
 down = (df["Trend"] == "Down").sum()
+
 market = "🟢 BUY" if down == 0 else "🟡 HOLD" if down == 1 else "🔴 DEFENSIVE"
 
-st.markdown(
-    f"<div style='padding:8px;background:#111;border-radius:6px'><b>🌍 Market:</b> {market}</div>",
-    unsafe_allow_html=True
-)
+# ================= KPI CARDS =================
+
+c1, c2, c3, c4 = st.columns(4)
+
+with c1:
+    st.markdown(f"<div class='kpi'><p>Total Value</p><h2>${total_value:,.0f}</h2></div>", unsafe_allow_html=True)
+with c2:
+    st.markdown(f"<div class='kpi'><p>Monthly Income</p><h2>${total_monthly_income:,.0f}</h2></div>", unsafe_allow_html=True)
+with c3:
+    st.markdown(f"<div class='kpi'><p>Annual Income</p><h2>${total_annual_income:,.0f}</h2></div>", unsafe_allow_html=True)
+with c4:
+    st.markdown(f"<div class='kpi'><p>Market</p><h2>{market}</h2></div>", unsafe_allow_html=True)
 
 # ================= VALUE IMPACT =================
 
+st.markdown("<div class='card'>", unsafe_allow_html=True)
 st.markdown("##### 💥 ETF Value Impact vs Income (per ETF)")
 
 impact = []
@@ -211,6 +237,7 @@ for t in ETF_LIST:
     })
 
 st.dataframe(pd.DataFrame(impact), use_container_width=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
 # ================= NEWS =================
 
@@ -254,18 +281,6 @@ with st.expander("📁 Portfolio", expanded=True):
 
     st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
 
-    total_value = df["Value"].sum() + safe_float(st.session_state.cash)
-    total_annual_income = df["Weekly Income"].sum() * 52
-    total_monthly_income = total_annual_income / 12
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("💼 Portfolio Value", f"${total_value:,.2f}")
-    with c2:
-        st.metric("💸 Annual Income", f"${total_annual_income:,.2f}")
-    with c3:
-        st.metric("📅 Monthly Income", f"${total_monthly_income:,.2f}")
-
 save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ================= SNAPSHOTS =================
@@ -297,16 +312,13 @@ with st.expander("📤 Export & Snapshot Analysis", expanded=True):
         hist_vals = []
         for f in files:
             d = pd.read_csv(os.path.join(SNAP_DIR, f))
-            hist_vals.append({
-                "Date": f.replace(".csv",""),
-                "Total Value": d["Value"].sum()
-            })
+            hist_vals.append({"Date": f.replace(".csv",""), "Total Value": d["Value"].sum()})
 
         chart_df = pd.DataFrame(hist_vals)
 
         chart = alt.Chart(chart_df).mark_line(point=True).encode(
             x="Date",
-            y=alt.Y("Total Value", scale=alt.Scale(domain=[10500, 11500]))
+            y=alt.Y("Total Value", scale=alt.Scale(domain=[10000, 12000]))
         )
 
         st.markdown("##### 📈 Portfolio Value Over Time (Zoomed)")
@@ -353,4 +365,4 @@ with st.expander("🔮 Income Outlook (Phase 8)"):
     for _, r in df.iterrows():
         st.write(f"{r.Ticker} → Monthly ${r['Monthly Income']}")
 
-st.caption("v21.3 • Smaller headers • Zoomed portfolio chart • No features removed")
+st.caption("v22.0 • KPI cards added • Cleaner layout • No logic changes")
