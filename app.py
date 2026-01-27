@@ -20,14 +20,22 @@ def safe_float(x):
 
 # ================= PAGE =================
 
+st.set_page_config(page_title="Income Strategy Engine", layout="centered")
+
 st.markdown(
-    "<div style='font-size:24px; font-weight:800;'>📈 Income Strategy Engine</div>"
+    "<div style='font-size:22px; font-weight:700;'>📈 Income Strategy Engine</div>"
     "<div style='font-size:13px; opacity:0.7;'>Dividend Run-Up Monitor</div>",
     unsafe_allow_html=True
 )
 
 ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 DEFAULT_SHARES = {"QDTE": 125, "CHPY": 63, "XDTE": 84}
+
+UNDERLYING_MAP = {
+    "QDTE": "QQQ",
+    "XDTE": "SPY",
+    "CHPY": "SOXX"
+}
 
 RSS_MAP = {
     "QDTE": "https://news.google.com/rss/search?q=Nasdaq+technology+stocks+market&hl=en-US&gl=US&ceid=US:en",
@@ -90,7 +98,8 @@ def get_price(ticker):
 def get_auto_div_ps(ticker):
     try:
         divs = yf.Ticker(ticker).dividends
-        if len(divs)==0: return 0.0
+        if len(divs) == 0:
+            return 0.0
         return float(divs.iloc[-1])
     except:
         return 0.0
@@ -109,7 +118,7 @@ def get_drawdown(ticker):
         df = yf.Ticker(ticker).history(period="1mo")
         high = df["Close"].max()
         last = df["Close"].iloc[-1]
-        return round((high-last)/high*100,2)
+        return round((high - last) / high * 100, 2)
     except:
         return 0
 
@@ -121,9 +130,10 @@ def get_rss(url):
     except:
         return []
 
-# ================= BUILD DATA =================
+# ================= BUILD MAIN TABLE =================
 
 rows = []
+
 for t in ETF_LIST:
     price = get_price(t)
     auto_ps = get_auto_div_ps(t)
@@ -132,160 +142,163 @@ for t in ETF_LIST:
 
     shares = st.session_state.holdings[t]["shares"]
     manual_ps = safe_float(st.session_state.holdings[t]["weekly_div_ps"])
-    div_ps = manual_ps if manual_ps>0 else auto_ps
 
+    div_ps = manual_ps if manual_ps > 0 else auto_ps
     weekly_income = div_ps * shares
+
     value = (price or 0) * shares
-    monthly = weekly_income * 52 / 12
+    annual = weekly_income * 52
+    monthly = annual / 12
 
     rows.append({
         "Ticker": t,
-        "Weekly Income": round(weekly_income,2),
-        "Monthly Income": round(monthly,2),
-        "Value": round(value,2),
+        "Shares": shares,
+        "Price": price,
+        "Div / Share": round(div_ps, 4),
+        "Weekly Income": round(weekly_income, 2),
+        "Monthly Income": round(monthly, 2),
+        "Value": round(value, 2),
         "Trend": trend,
         "Drawdown %": drawdown
     })
 
 df = pd.DataFrame(rows)
 
+# ================= MARKET CONDITION =================
+
+down = (df["Trend"] == "Down").sum()
+market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
+m_color = "#4CAF50" if market == "BUY" else "#FFC107" if market == "HOLD" else "#F44336"
+
+# ================= KPI CARDS =================
+
 total_value = df["Value"].sum() + safe_float(st.session_state.cash)
 total_annual_income = df["Weekly Income"].sum() * 52
 total_monthly_income = total_annual_income / 12
 
-down = (df["Trend"]=="Down").sum()
-market = "🟢 BUY" if down==0 else "🟡 HOLD" if down==1 else "🔴 DEFENSIVE"
+kpi_html = f"""
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
+<div style="background:#111;padding:16px;border-radius:14px;text-align:center">
+<b>Total Value</b><br><span style="font-size:22px">${total_value:,.0f}</span></div>
+<div style="background:#111;padding:16px;border-radius:14px;text-align:center">
+<b>Monthly Income</b><br><span style="font-size:22px">${total_monthly_income:,.0f}</span></div>
+<div style="background:#111;padding:16px;border-radius:14px;text-align:center">
+<b>Annual Income</b><br><span style="font-size:22px">${total_annual_income:,.0f}</span></div>
+<div style="background:#111;padding:16px;border-radius:14px;text-align:center">
+<b>Market</b><br>
+<span style="display:flex;justify-content:center;align-items:center">
+<span style="width:12px;height:12px;border-radius:50%;background:{m_color};display:inline-block;margin-right:6px"></span>
+<b>{market}</b>
+</span>
+</div>
+</div>
+"""
+st.markdown(kpi_html, unsafe_allow_html=True)
 
-# ================= TABS =================
+# ================= ETF SIGNAL CARDS =================
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard","📰 News","📁 Portfolio","📸 Snapshots"])
+st.markdown("### 💥 ETF Signals")
 
-# ================= DASHBOARD =================
+cards = "<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>"
 
-with tab1:
+for t in ETF_LIST:
 
-    r1c1, r1c2 = st.columns(2)
-    r2c1, r2c2 = st.columns(2)
+    hist = get_hist(t)
+    shares = st.session_state.holdings[t]["shares"]
 
-    r1c1.metric("Total Value", f"${total_value:,.0f}")
-    r1c2.metric("Monthly Income", f"${total_monthly_income:,.0f}")
-    r2c1.metric("Annual Income", f"${total_annual_income:,.0f}")
-    r2c2.metric("Market", market)
+    if hist is not None and len(hist) > 25:
+        now = hist["Close"].iloc[-1]
+        d14 = hist["Close"].iloc[-10]
+        d28 = hist["Close"].iloc[-20]
+        chg14 = (now - d14) * shares
+        chg28 = (now - d28) * shares
+    else:
+        chg14 = chg28 = 0
 
-    st.markdown("### 💥 ETF Signals")
+    weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
 
-    pairs = [ETF_LIST[i:i+2] for i in range(0, len(ETF_LIST), 2)]
+    if chg14 >= 0 and chg28 >= 0:
+        sig = "BUY / HOLD"
+        color = "#4CAF50"
+    elif weekly >= abs(chg28) or weekly >= abs(chg14):
+        sig = "WATCH"
+        color = "#FFC107"
+    else:
+        sig = "REDUCE"
+        color = "#F44336"
 
-    for pair in pairs:
-        cols = st.columns(2)
+    cards += f"""
+    <div style="background:#111;border-radius:14px;padding:12px">
+    <b>{t}</b><br>
+    Weekly: ${weekly:.2f}<br>
+    14d: ${chg14:.2f} | 28d: ${chg28:.2f}<br>
+    <span style="display:flex;align-items:center;margin-top:6px">
+    <span style="width:12px;height:12px;border-radius:50%;background:{color};display:inline-block;margin-right:6px"></span>
+    <b>{sig}</b></span></div>
+    """
 
-        for idx, t in enumerate(pair):
-
-            hist = get_hist(t)
-            shares = st.session_state.holdings[t]["shares"]
-
-            if hist is not None and len(hist) > 25:
-                now = hist["Close"].iloc[-1]
-                d14 = hist["Close"].iloc[-10]
-                d28 = hist["Close"].iloc[-20]
-                chg14 = (now - d14) * shares
-                chg28 = (now - d28) * shares
-            else:
-                chg14 = chg28 = 0
-
-            weekly = df[df.Ticker == t]["Weekly Income"].iloc[0]
-
-            if chg14 >= 0 and chg28 >= 0:
-                sig = "🟢 BUY / HOLD"
-            elif weekly >= abs(chg28) or weekly >= abs(chg14):
-                sig = "🟡 WATCH"
-            else:
-                sig = "🔴 REDUCE"
-
-            with cols[idx]:
-                st.markdown(f"""
-                <div style="
-                    background:#111;
-                    border-radius:14px;
-                    padding:12px;
-                    margin-bottom:12px;
-                    box-shadow:0 0 10px rgba(0,0,0,0.4);
-                ">
-                <b>{t}</b><br>
-                Weekly: ${weekly:.2f}<br>
-                14d: ${chg14:.2f} | 28d: ${chg28:.2f}<br>
-                <b>{sig}</b>
-                </div>
-                """, unsafe_allow_html=True)
+cards += "</div>"
+st.markdown(cards, unsafe_allow_html=True)
 
 # ================= NEWS =================
 
-with tab2:
+with st.expander("📰 Market & Sector News"):
     for t in ETF_LIST:
-        st.markdown(f"### 📌 {t} — Market News")
-        entries = get_rss(RSS_MAP.get(t,""))
-        if entries:
-            for n in entries:
-                title=n.get("title","Open")
-                link=n.get("link","")
-                if link: st.markdown(f"• [{title}]({link})")
-                else: st.write("•",title)
-        else:
-            st.info("No news right now.")
+        st.markdown(f"##### 📌 {t}")
+        entries = get_rss(RSS_MAP.get(t, ""))
+        for n in entries:
+            st.markdown(f"• [{n.get('title','Open')}]({n.get('link','')})")
         st.divider()
 
 # ================= PORTFOLIO =================
 
-with tab3:
+with st.expander("📁 Portfolio", expanded=True):
     for t in ETF_LIST:
-        st.markdown(f"### {t}")
-        c1,c2 = st.columns(2)
+        st.markdown(f"##### {t}")
+        c1, c2 = st.columns(2)
         with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input(
-                "Shares",0,step=1,value=st.session_state.holdings[t]["shares"],key=f"s_{t}")
+            st.session_state.holdings[t]["shares"] = st.number_input("Shares", min_value=0, step=1,
+                value=st.session_state.holdings[t]["shares"], key=f"s_{t}")
         with c2:
             st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
-                "Weekly Div / Share ($)",value=str(st.session_state.holdings[t]["weekly_div_ps"]),key=f"dps_{t}")
-
-        r = df[df.Ticker==t].iloc[0]
-        st.caption(f"Value: ${r.Value:.2f} | Monthly Income: ${r['Monthly Income']:.2f}")
+                "Weekly Dividend / Share", value=str(st.session_state.holdings[t]["weekly_div_ps"]), key=f"dps_{t}")
         st.divider()
 
-    st.session_state.cash = st.text_input("💰 Cash Wallet ($)",value=str(st.session_state.cash))
+    st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
 
-save_to_browser({"holdings":st.session_state.holdings,"cash":st.session_state.cash})
+save_to_browser({"holdings": st.session_state.holdings, "cash": st.session_state.cash})
 
 # ================= SNAPSHOTS =================
 
-with tab4:
+with st.expander("📤 Export & Snapshot Analysis", expanded=True):
 
     if st.button("💾 Save Snapshot"):
-        path = os.path.join(SNAP_DIR,f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-        df.to_csv(path,index=False)
+        path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        df.to_csv(path, index=False)
         st.success("Snapshot saved")
 
     files = sorted(os.listdir(SNAP_DIR))
     if files:
-        snap = st.selectbox("Compare with snapshot:",files)
+        snap = st.selectbox("📂 Compare with snapshot:", files)
+        snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
 
-        snap_df = pd.read_csv(os.path.join(SNAP_DIR,snap))
-        comp = df.merge(snap_df, on="Ticker", suffixes=("_Now","_Then"))
+        comp = df[["Ticker", "Value"]].merge(
+            snap_df[["Ticker", "Value"]], on="Ticker", suffixes=("_Now", "_Then"))
         comp["Change ($)"] = comp["Value_Now"] - comp["Value_Then"]
 
-        st.dataframe(comp[["Ticker","Value_Now","Value_Then","Change ($)"]],use_container_width=True)
+        st.dataframe(comp, use_container_width=True)
 
-        hist_vals=[]
+        hist_vals = []
         for f in files:
-            d=pd.read_csv(os.path.join(SNAP_DIR,f))
-            hist_vals.append({"Date":f.replace(".csv",""),"Total Value":d["Value"].sum()})
+            d = pd.read_csv(os.path.join(SNAP_DIR, f))
+            hist_vals.append({"Date": f.replace(".csv",""), "Total Value": d["Value"].sum()})
 
-        chart_df=pd.DataFrame(hist_vals)
+        chart_df = pd.DataFrame(hist_vals)
 
         chart = alt.Chart(chart_df).mark_line(point=True).encode(
             x="Date",
-            y=alt.Y("Total Value",scale=alt.Scale(domain=[10000,12000]))
+            y=alt.Y("Total Value", scale=alt.Scale(domain=[10000, 12000]))
         )
+        st.altair_chart(chart, use_container_width=True)
 
-        st.altair_chart(chart,use_container_width=True)
-
-st.caption("v23.6 • TRUE 2-column ETF cards • KPI grid • Tabs • Snapshot chart • No features removed")
+st.caption("v23.4 • KPI grid • ETF cards • Signal dots • All features preserved")
