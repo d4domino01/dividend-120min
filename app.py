@@ -4,6 +4,7 @@ import yfinance as yf
 import feedparser
 from datetime import datetime
 import os
+import math
 
 # ================== CONFIG ==================
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
@@ -36,6 +37,11 @@ def get_price(t):
     except:
         return 0.0
 
+def safe(v):
+    if v is None or isinstance(v, float) and math.isnan(v):
+        return 0.0
+    return float(v)
+
 def rss(q):
     return feedparser.parse(f"https://news.google.com/rss/search?q={q}+stock")
 
@@ -48,8 +54,8 @@ with tab[0]:
 
     prices = {t: get_price(t) for t in ETFS}
 
-    total_value = 0
-    weekly_income = 0
+    total_value = 0.0
+    weekly_income = 0.0
 
     for t in ETFS:
         s = st.session_state.holdings[t]["shares"]
@@ -73,14 +79,16 @@ with tab[0]:
         price = prices[t]
 
         hist = yf.download(t, period="2mo", interval="1d", progress=False)
-        if len(hist) > 30:
-            p14 = price - hist["Close"].iloc[-14]
-            p28 = price - hist["Close"].iloc[-28]
-        else:
-            p14 = p28 = 0
 
-        c14 = "green" if p14 >= 0 else "red"
-        c28 = "green" if p28 >= 0 else "red"
+        if hist is not None and len(hist) > 30:
+            p14 = safe(price - hist["Close"].iloc[-14])
+            p28 = safe(price - hist["Close"].iloc[-28])
+        else:
+            p14 = 0.0
+            p28 = 0.0
+
+        c14 = "lime" if p14 >= 0 else "red"
+        c28 = "lime" if p28 >= 0 else "red"
 
         weekly = st.session_state.holdings[t]["div"] * s
 
@@ -120,8 +128,8 @@ with tab[2]:
 
     prices = {t: get_price(t) for t in ETFS}
 
-    total_stock = 0
-    total_weekly = 0
+    total_stock = 0.0
+    total_weekly = 0.0
 
     for t in ETFS:
         st.subheader(t)
