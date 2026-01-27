@@ -180,7 +180,11 @@ with tab1:
 
     st.markdown("### 💥 ETF Signals")
 
+    grid = st.columns(2)
+
+    i = 0
     for t in ETF_LIST:
+
         hist = get_hist(t)
         shares = st.session_state.holdings[t]["shares"]
 
@@ -202,14 +206,23 @@ with tab1:
         else:
             sig="🔴 REDUCE"
 
-        st.markdown(f"""
-        **{t}**  
-        Weekly Income: ${weekly:.2f}  
-        14d Impact: ${chg14:.2f} | 28d Impact: ${chg28:.2f}  
+        with grid[i%2]:
+            st.markdown(f"""
+            <div style="
+                background:#111;
+                border-radius:14px;
+                padding:12px;
+                margin-bottom:10px;
+                box-shadow:0 0 10px rgba(0,0,0,0.4);
+            ">
+            <b>{t}</b><br>
+            Weekly: ${weekly:.2f}<br>
+            14d: ${chg14:.2f} | 28d: ${chg28:.2f}<br>
+            <b>{sig}</b>
+            </div>
+            """, unsafe_allow_html=True)
 
-        **{sig}**
-        """)
-        st.divider()
+        i += 1
 
 # ================= NEWS =================
 
@@ -234,9 +247,11 @@ with tab3:
         st.markdown(f"### {t}")
         c1,c2 = st.columns(2)
         with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input("Shares",0,step=1,value=st.session_state.holdings[t]["shares"],key=f"s_{t}")
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares",0,step=1,value=st.session_state.holdings[t]["shares"],key=f"s_{t}")
         with c2:
-            st.session_state.holdings[t]["weekly_div_ps"] = st.text_input("Weekly Div / Share ($)",value=str(st.session_state.holdings[t]["weekly_div_ps"]),key=f"dps_{t}")
+            st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
+                "Weekly Div / Share ($)",value=str(st.session_state.holdings[t]["weekly_div_ps"]),key=f"dps_{t}")
 
         r = df[df.Ticker==t].iloc[0]
         st.caption(f"Price: ${r.Price} | Div/Share: {r['Div / Share']} | Drawdown: {r['Drawdown %']}%")
@@ -283,4 +298,4 @@ with tab4:
 
         st.altair_chart(chart,use_container_width=True)
 
-st.caption("v23.2 • KPI grid • Emoji signal dots • Tabs • Snapshot chart • No features removed")
+st.caption("v23.4 • KPI grid • ETF signal cards • Emoji dots • Tabs • Snapshot chart • No features removed")
