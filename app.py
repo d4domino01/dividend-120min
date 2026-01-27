@@ -179,4 +179,4 @@ with tab_strategy:
             <li>Market regime</li>
         </ul>
     </div>
-    """, unsafe_allow_html=True)
+    """, unsafe_allow_html=True
