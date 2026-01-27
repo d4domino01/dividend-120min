@@ -143,7 +143,7 @@ market = "BUY" if down == 0 else "HOLD" if down == 1 else "DEFENSIVE"
 st.markdown("## 📈 Income Strategy Engine")
 st.caption("Dividend Run-Up Monitor")
 
-tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📤 Snapshots"])
+tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📤 Snapshots", "📈 Strategy"])
 
 # ================= DASHBOARD =================
 
@@ -162,7 +162,7 @@ with tabs[0]:
 
     st.markdown("#### 💥 ETF Signals")
 
-    cards = ""
+    signal_cards = ""
 
     for t in ETF_LIST:
         hist = get_hist(t)
@@ -186,7 +186,7 @@ with tabs[0]:
         else:
             sig = "REDUCE"; color="#F44336"
 
-        cards += f"""
+        signal_cards += f"""
         <div class="card">
           <b>{t}</b><br>
           <small>Weekly: ${weekly:.2f}</small><br>
@@ -195,7 +195,7 @@ with tabs[0]:
         </div>
         """
 
-    st.markdown(f'<div class="grid2">{cards}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="grid2">{signal_cards}</div>', unsafe_allow_html=True)
 
 # ================= NEWS =================
 
@@ -213,9 +213,13 @@ with tabs[2]:
         st.markdown(f"#### {t}")
         c1, c2 = st.columns(2)
         with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input("Shares", 0, 10000, st.session_state.holdings[t]["shares"], key=f"s_{t}")
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares", 0, 10000, st.session_state.holdings[t]["shares"], key=f"s_{t}"
+            )
         with c2:
-            st.session_state.holdings[t]["weekly_div_ps"] = st.text_input("Weekly Div/Share", st.session_state.holdings[t]["weekly_div_ps"], key=f"dps_{t}")
+            st.session_state.holdings[t]["weekly_div_ps"] = st.text_input(
+                "Weekly Div/Share", st.session_state.holdings[t]["weekly_div_ps"], key=f"dps_{t}"
+            )
         st.divider()
 
     st.session_state.cash = st.text_input("💰 Cash Wallet ($)", value=str(st.session_state.cash))
@@ -258,4 +262,29 @@ with tabs[3]:
 
         st.altair_chart(chart, use_container_width=True)
 
-st.caption("v29 • HTML rendering fixed • True 2-column cards on mobile • Tabs intact")
+# ================= STRATEGY =================
+
+with tabs[4]:
+
+    st.markdown("#### 📈 Strategy Mode")
+
+    st.markdown("""
+    <div class="card">
+    <b>Current Strategy:</b> Dividend Run-Up / Income Stability
+    <ul>
+      <li>Prioritize weekly & monthly income ETFs</li>
+      <li>Watch 14d and 28d price damage vs income</li>
+      <li>Avoid selling during temporary dips</li>
+      <li>Reinvest when income exceeds drawdown</li>
+    </ul>
+    <b>Future Engine:</b>
+    <ul>
+      <li>Momentum scoring</li>
+      <li>Distribution cut alerts</li>
+      <li>Underlying index strength</li>
+      <li>Market regime switching</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.caption("v30 • Strategy tab restored • ETF cards stable • No layout changes")
