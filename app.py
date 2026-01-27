@@ -7,17 +7,14 @@ import os
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ---------------- THEME CSS ----------------
+# ---------------- CSS ----------------
 st.markdown("""
 <style>
-body { background-color: #0e1117; color: white; }
-
 .card {
     background: linear-gradient(145deg, #0f131a, #0b0e13);
     border-radius: 18px;
     padding: 18px;
     border: 1px solid rgba(255,255,255,0.06);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
 .kpi-title { font-size: 13px; opacity: 0.7; }
@@ -31,22 +28,16 @@ body { background-color: #0e1117; color: white; }
     display: inline-block;
     margin-right: 8px;
 }
-
-.tab-title {
-    font-size: 18px;
-    font-weight: 700;
-}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- DEFAULT DATA ----------------
+# ---------------- DATA ----------------
 ETFS = {
-    "QDTE": {"shares": 125, "weekly": 22.12, "d14": 1.13, "d28": 26.50},
-    "XDTE": {"shares": 84, "weekly": 13.52, "d14": 3.22, "d28": 30.08},
-    "CHPY": {"shares": 63, "weekly": 33.20, "d14": 56.99, "d28": 307.36},
+    "QDTE": {"weekly": 22.12, "d14": 1.13, "d28": 26.50},
+    "XDTE": {"weekly": 13.52, "d14": 3.22, "d28": 30.08},
+    "CHPY": {"weekly": 33.20, "d14": 56.99, "d28": 307.36},
 }
 
-# ---------------- CALCS ----------------
 total_value = 10993
 monthly_income = 298
 annual_income = 3580
@@ -117,15 +108,12 @@ with tab_dash:
 # ======================= NEWS =============================
 # ==========================================================
 with tab_news:
+    st.markdown("## 📰 ETF News")
 
-    st.markdown("## 📰 Market & ETF News")
-
-    tickers = list(ETFS.keys())
-
-    for t in tickers:
+    for t in ETFS.keys():
+        st.markdown(f"### {t}")
         try:
             news = yf.Ticker(t).news[:3]
-            st.markdown(f"### {t}")
             for n in news:
                 st.markdown(f"- [{n['title']}]({n['link']})")
         except:
@@ -135,14 +123,12 @@ with tab_news:
 # ===================== PORTFOLIO ==========================
 # ==========================================================
 with tab_port:
-
     st.markdown("## 📁 Holdings")
 
-    rows = []
-    for t, d in ETFS.items():
-        rows.append([t, d["shares"], d["weekly"]])
+    df = pd.DataFrame([
+        [t, ETFS[t]["weekly"]] for t in ETFS
+    ], columns=["Ticker", "Weekly Income"])
 
-    df = pd.DataFrame(rows, columns=["Ticker", "Shares", "Weekly Income"])
     st.dataframe(df, use_container_width=True)
 
 # ==========================================================
@@ -166,7 +152,7 @@ with tab_snap:
         st.dataframe(old, use_container_width=True)
 
 # ==========================================================
-# ===================== STRATEGY TAB =======================
+# ===================== STRATEGY ===========================
 # ==========================================================
 with tab_strategy:
 
@@ -178,15 +164,14 @@ with tab_strategy:
 
         <ul>
             <li>Focus on weekly and monthly income ETFs</li>
-            <li>Watch 14d and 28d price impact before distributions</li>
-            <li>Avoid selling during temporary volatility</li>
-            <li>Reinvest when trend and income both positive</li>
+            <li>Watch 14d and 28d price impact</li>
+            <li>Avoid selling during volatility</li>
+            <li>Reinvest when trend and income align</li>
         </ul>
 
         <br>
         <b>Next Upgrade:</b><br>
-        Strategy engine will dynamically change BUY / HOLD / SELL
-        based on:
+        Strategy engine will adapt signals using:
         <ul>
             <li>Price momentum</li>
             <li>Distribution changes</li>
