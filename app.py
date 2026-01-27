@@ -2,14 +2,18 @@ import streamlit as st
 import pandas as pd
 import feedparser
 import yfinance as yf
-import os
 from datetime import datetime
+import os
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
+
+# ---------------- PATHS ----------------
+SNAP_DIR = "snapshots"
+os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ---------------- DEFAULT SESSION ----------------
 if "holdings" not in st.session_state:
@@ -62,7 +66,9 @@ prices = {t: get_price(t) for t in etf_list}
 rows = []
 stock_value_total = 0.0
 total_weekly_income = 0.0
-impact_14d, impact_28d = {}, {}
+
+impact_14d = {}
+impact_28d = {}
 
 for t in etf_list:
     h = st.session_state.holdings[t]
@@ -86,14 +92,17 @@ for t in etf_list:
             impact_14d[t] = round((now - d14) * shares, 2)
             impact_28d[t] = round((now - d28) * shares, 2)
         else:
-            impact_14d[t] = impact_28d[t] = 0.0
+            impact_14d[t] = 0.0
+            impact_28d[t] = 0.0
     except:
-        impact_14d[t] = impact_28d[t] = 0.0
+        impact_14d[t] = 0.0
+        impact_28d[t] = 0.0
 
     rows.append({
         "Ticker": t,
         "Shares": shares,
         "Price ($)": price,
+        "Div / Share ($)": div,
         "Weekly Income ($)": round(weekly_income, 2),
         "Monthly Income ($)": round(monthly_income, 2),
         "Value ($)": round(value, 2),
@@ -101,8 +110,9 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
+# ---- TOTALS ----
 cash = float(st.session_state.cash)
-total_value = round(stock_value_total + cash, 2)
+total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
 annual_income = monthly_income * 12
 market_signal = "BUY"
@@ -113,7 +123,10 @@ st.caption("Dividend Run-Up Monitor")
 
 tabs = st.tabs(["📊 Dashboard", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
+# ============================================================
 # ======================= DASHBOARD ==========================
+# ============================================================
+
 with tabs[0]:
 
     st.subheader("📊 Overview")
@@ -128,7 +141,7 @@ with tabs[0]:
 
     st.divider()
 
-    table_only = st.toggle("Table view only", value=False)
+    table_only = st.toggle("Table only view", value=False)
 
     dash_rows = []
     for _, r in df.iterrows():
@@ -141,24 +154,6 @@ with tabs[0]:
         })
 
     dash_df = pd.DataFrame(dash_rows)
-
-    def color_pos_neg(val):
-        if val > 0:
-            return "color:#22c55e"
-        elif val < 0:
-            return "color:#ef4444"
-        return ""
-
-    styled = (
-        dash_df
-        .style
-        .applymap(color_pos_neg, subset=["14d ($)", "28d ($)"])
-        .format({
-            "Weekly ($)": "${:,.2f}",
-            "14d ($)": "{:+,.2f}",
-            "28d ($)": "{:+,.2f}",
-        })
-    )
 
     if not table_only:
         for _, row in dash_df.iterrows():
@@ -175,10 +170,25 @@ with tabs[0]:
             </div>
             """, unsafe_allow_html=True)
 
+    styled = (
+        dash_df
+        .style
+        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444" if v < 0 else "",
+                  subset=["14d ($)", "28d ($)"])
+        .format({
+            "Weekly ($)": "${:,.2f}",
+            "14d ($)": "{:+,.2f}",
+            "28d ($)": "{:+,.2f}",
+        })
+    )
     st.dataframe(styled, use_container_width=True)
 
+# ============================================================
 # ========================= NEWS =============================
+# ============================================================
+
 with tabs[1]:
+
     st.subheader("📰 ETF • Market • Stock News")
 
     for tkr in etf_list:
@@ -198,7 +208,10 @@ with tabs[1]:
 
         st.divider()
 
+# ============================================================
 # ===================== PORTFOLIO TAB ========================
+# ============================================================
+
 with tabs[2]:
 
     st.subheader("📁 Portfolio Control Panel")
@@ -234,49 +247,86 @@ with tabs[2]:
     st.subheader("💰 Cash Wallet")
     st.session_state.cash = st.number_input(
         "Cash ($)", min_value=0.0, step=50.0,
-        value=float(st.session_state.cash)
+        value=float(st.session_state.cash), key="cash_wallet"
     )
 
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
-# ===================== SNAPSHOTS (CRASH-PROOF) ========================
+# ============================================================
+# ===================== SNAPSHOTS TAB ========================
+# ============================================================
+
 with tabs[3]:
 
     st.subheader("📸 Portfolio Value Snapshots")
 
-    SNAP_DIR = "snapshots"
-    os.makedirs(SNAP_DIR, exist_ok=True)
+    colA, colB = st.columns(2)
 
-    if st.button("🧹 Delete ALL Snapshots"):
-        for f in os.listdir(SNAP_DIR):
-            os.remove(os.path.join(SNAP_DIR, f))
-        st.success("All snapshots deleted.")
+    with colA:
+        if st.button("💾 Save Snapshot"):
+            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            snap = df[["Ticker", "Value ($)"]].copy()
+            snap["Cash"] = cash
+            snap["Total"] = total_value
+            snap.to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
+            st.success("Snapshot saved.")
 
-    if st.button("💾 Save Snapshot"):
-        snap = pd.DataFrame([{
-            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "Total Value ($)": total_value
-        }])
-        fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
-        snap.to_csv(os.path.join(SNAP_DIR, fname), index=False)
-        st.success("Snapshot saved.")
+    with colB:
+        if st.button("🧹 Delete ALL Snapshots"):
+            for f in os.listdir(SNAP_DIR):
+                os.remove(os.path.join(SNAP_DIR, f))
+            st.warning("All snapshots deleted.")
 
-    history = []
+    files = sorted(os.listdir(SNAP_DIR))
+    all_snaps = []
 
-    for f in os.listdir(SNAP_DIR):
+    for f in files:
         try:
-            dfh = pd.read_csv(os.path.join(SNAP_DIR, f))
-            if "Timestamp" in dfh.columns and "Total Value ($)" in dfh.columns:
-                history.append(dfh.iloc[0])
+            d = pd.read_csv(os.path.join(SNAP_DIR, f))
+            d["Snapshot"] = f
+            all_snaps.append(d)
         except:
             pass
 
-    if history:
-        hist_df = pd.DataFrame(history)
-        hist_df["Timestamp"] = pd.to_datetime(hist_df["Timestamp"])
-        hist_df = hist_df.sort_values("Timestamp")
-        st.line_chart(hist_df.set_index("Timestamp")["Total Value ($)"])
-    else:
-        st.info("No valid snapshots yet.")
+    if all_snaps:
 
-st.caption("v3.6 • Snapshot system hardened • No KeyErrors possible")
+        hist_df = pd.concat(all_snaps)
+
+        # -------- Portfolio total over time --------
+        totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
+        st.line_chart(totals.set_index("Snapshot")["Total"])
+
+        # -------- ETF Historical Analysis --------
+        st.subheader("📊 ETF Performance Across ALL Snapshots")
+
+        etf_stats = []
+
+        for t in etf_list:
+            vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
+
+            if len(vals) >= 2:
+                etf_stats.append({
+                    "Ticker": t,
+                    "Start ($)": round(vals.iloc[0], 2),
+                    "Latest ($)": round(vals.iloc[-1], 2),
+                    "Net ($)": round(vals.iloc[-1] - vals.iloc[0], 2),
+                    "Best ($)": round(vals.max(), 2),
+                    "Worst ($)": round(vals.min(), 2),
+                })
+
+        stats_df = pd.DataFrame(etf_stats)
+
+        styled_stats = (
+            stats_df
+            .style
+            .applymap(lambda v: "color:#22c55e" if isinstance(v, (int,float)) and v > 0 else "color:#ef4444",
+                      subset=["Net ($)"])
+            .format("${:,.2f}", subset=["Start ($)", "Latest ($)", "Net ($)", "Best ($)", "Worst ($)"])
+        )
+
+        st.dataframe(styled_stats, use_container_width=True)
+
+    else:
+        st.info("No snapshots yet. Save at least one to begin analysis.")
+
+st.caption("v3.7 • Full snapshot history ETF analysis enabled • Stable wallet + dashboard")
