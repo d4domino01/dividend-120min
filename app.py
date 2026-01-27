@@ -2,12 +2,18 @@ import streamlit as st
 import pandas as pd
 import feedparser
 import yfinance as yf
+import os
+from datetime import datetime
+import altair as alt
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
+
+SNAP_DIR = "snapshots"
+os.makedirs(SNAP_DIR, exist_ok=True)
 
 # ---------------- DEFAULT SESSION ----------------
 if "holdings" not in st.session_state:
@@ -79,7 +85,6 @@ for t in etf_list:
     stock_value_total += value
     total_weekly_income += weekly_income
 
-    # price impact
     try:
         hist = yf.Ticker(t).history(period="30d")
         if len(hist) > 20:
@@ -107,7 +112,7 @@ for t in etf_list:
 
 df = pd.DataFrame(rows)
 
-# ---- TOTALS (NOW INCLUDE CASH) ----
+# ---- TOTALS ----
 cash = float(st.session_state.cash)
 total_value = stock_value_total + cash
 monthly_income = total_weekly_income * 52 / 12
@@ -254,7 +259,6 @@ with tabs[2]:
 
     st.subheader("💰 Cash Wallet")
 
-    # ✅ FIXED — no more double-enter needed
     st.number_input(
         "Cash ($)",
         min_value=0.0,
@@ -269,7 +273,48 @@ with tabs[2]:
 # ============================================================
 
 with tabs[3]:
-    st.subheader("📸 Snapshots")
-    st.info("Snapshot history + backtesting will be restored next.")
 
-st.caption("v3.2.1 • Wallet input fixed • No other changes")
+    st.subheader("📸 Portfolio Snapshots & Backtest")
+
+    if st.button("💾 Save Snapshot"):
+        path = os.path.join(SNAP_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        df.to_csv(path, index=False)
+        st.success("Snapshot saved")
+
+    files = sorted(os.listdir(SNAP_DIR))
+    if files:
+        snap = st.selectbox("Compare with snapshot:", files)
+
+        snap_df = pd.read_csv(os.path.join(SNAP_DIR, snap))
+
+        comp = df[["Ticker", "Value ($)"]].merge(
+            snap_df[["Ticker", "Value ($)"]],
+            on="Ticker",
+            suffixes=("_Now", "_Then")
+        )
+
+        comp["Change ($)"] = comp["Value ($)_Now"] - comp["Value ($)_Then"]
+
+        st.dataframe(comp, use_container_width=True)
+
+        hist_vals = []
+        for f in files:
+            d = pd.read_csv(os.path.join(SNAP_DIR, f))
+            hist_vals.append({
+                "Date": f.replace(".csv", ""),
+                "Total Value": d["Value ($)"].sum()
+            })
+
+        chart_df = pd.DataFrame(hist_vals)
+
+        chart = alt.Chart(chart_df).mark_line(point=True).encode(
+            x="Date",
+            y="Total Value"
+        )
+
+        st.altair_chart(chart, use_container_width=True)
+
+    else:
+        st.info("No snapshots yet. Save your first snapshot above.")
+
+st.caption("v3.3 • Snapshot backtesting restored • Baseline preserved")
