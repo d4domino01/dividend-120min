@@ -365,7 +365,10 @@ with tabs[1]:
 # ========================= NEWS =============================
 with tabs[2]:
 
-    st.subheader("🧠 Market Temperament Summary")
+    st.subheader("📰 ETF News Sentiment Summary")
+
+    # ---------- QUICK GUIDE TABLE ----------
+    sentiment_rows = []
 
     summary_blocks = {}
 
@@ -384,28 +387,54 @@ with tabs[2]:
             if any(w in title for w in DANGER_WORDS):
                 danger += 1
 
+        # ----- SENTIMENT LABEL -----
+        if danger > 0:
+            sentiment = "🔴 High risk signals"
+        elif pos > neg:
+            sentiment = "🟢 Mostly positive tone"
+        elif neg > pos:
+            sentiment = "🟠 Cautious / negative tone"
+        else:
+            sentiment = "🟡 Mixed / unclear"
+
+        sentiment_rows.append({
+            "Ticker": tkr,
+            "News Sentiment": sentiment
+        })
+
+        # ----- PARAGRAPH SUMMARY -----
         if danger > 0:
             text = (
-                "Recent news includes warning signals such as trading halts, fund structure changes, "
-                "or operational concerns. This increases short-term risk and suggests caution with new capital."
+                "Recent coverage includes warning signals such as trading halts, fund structure risks, "
+                "or potential operational changes. This raises short-term risk and suggests caution "
+                "with adding new capital until conditions stabilize."
             )
         elif pos > neg:
             text = (
-                "Coverage remains largely constructive, supported by favorable market conditions and "
-                "positive developments in underlying holdings. Income strategy remains attractive under current trends."
+                "News remains broadly constructive, supported by stable market conditions and continued "
+                "strength in key underlying stocks. Income strategies appear intact, though performance "
+                "remains sensitive to short-term volatility."
             )
         elif neg > pos:
             text = (
-                "News flow is cautious, with concerns around volatility, earnings pressure, or sector pullbacks. "
-                "Income remains present, but capital risk is elevated in the short term."
+                "Coverage reflects rising caution, with concerns around sector pullbacks, earnings pressure, "
+                "or macro uncertainty. While income remains attractive, price risk is elevated in the near term."
             )
         else:
             text = (
-                "News is mixed and largely neutral, with no strong directional signals. "
-                "Price action may be driven more by overall market conditions than ETF-specific factors."
+                "News flow is mixed with no strong directional drivers. Price movement is likely to remain "
+                "driven by broader market conditions rather than ETF-specific developments."
             )
 
         summary_blocks[tkr] = text
+
+    sentiment_df = pd.DataFrame(sentiment_rows)
+    st.dataframe(sentiment_df, use_container_width=True)
+
+    st.divider()
+
+    # ---------- 3 PARAGRAPH SUMMARIES ----------
+    st.subheader("🧠 Market Temperament by ETF")
 
     for tkr in etf_list:
         st.markdown(f"""
@@ -417,9 +446,11 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("📰 Full News Sources")
+    # ---------- FULL NEWS SOURCES ----------
+    st.subheader("🗞 Full News Sources")
 
     for tkr in etf_list:
+
         st.markdown(f"### 🔹 {tkr}")
 
         st.markdown("**ETF / Strategy News**")
