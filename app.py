@@ -147,57 +147,6 @@ st.caption("Dividend Run-Up Monitor")
 
 tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# ======================= DASHBOARD ==========================
-with tabs[0]:
-    st.subheader("📊 Overview")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Value (incl. cash)", f"${total_value:,.2f}")
-        st.metric("Annual Income", f"${annual_income:,.2f}")
-    with col2:
-        st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown("**Market:** 🟢 BUY")
-
-    st.divider()
-
-    show_table_only = st.toggle("📋 Table only view")
-
-    dash_rows = []
-    for _, r in df.iterrows():
-        dash_rows.append({
-            "Ticker": r["Ticker"],
-            "Weekly ($)": r["Weekly Income ($)"],
-            "14d ($)": impact_14d[r["Ticker"]],
-            "28d ($)": impact_28d[r["Ticker"]],
-            "Signal": "BUY / HOLD"
-        })
-
-    dash_df = pd.DataFrame(dash_rows)
-
-    if not show_table_only:
-        for _, row in dash_df.iterrows():
-            c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
-            c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
-
-            st.markdown(f"""
-            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-            <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly ($)']:.2f}<br><br>
-            <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br><br>
-            🟢 {row['Signal']}
-            </div>
-            """, unsafe_allow_html=True)
-
-    styled = (
-        dash_df.style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444",
-                  subset=["14d ($)", "28d ($)"])
-        .format({"Weekly ($)": "${:,.2f}", "14d ($)": "{:+,.2f}", "28d ($)": "{:+,.2f}"})
-    )
-    st.dataframe(styled, use_container_width=True)
-
 # ======================= STRATEGY TAB =======================
 with tabs[1]:
 
@@ -220,11 +169,11 @@ with tabs[1]:
     st.metric("Overall Market Condition", market_state)
     st.divider()
 
-    # ===== NEW: DIVIDEND CHANGE & SUSPENSION MONITOR =====
+    # -------- SAFE DIVIDEND MONITOR --------
     st.subheader("🛡 Dividend Change & Suspension Monitor")
 
     div_rows = []
-    today_ts = pd.Timestamp.utcnow().tz_localize("UTC")
+    today = datetime.utcnow()
 
     for t in etf_list:
         hist = get_dividend_history(t)
@@ -245,13 +194,8 @@ with tabs[1]:
             note = "No dividend history"
 
         if hist:
-            last_date = pd.to_datetime(hist[-1][0])
-            if last_date.tzinfo is None:
-                last_date = last_date.tz_localize("UTC")
-            else:
-                last_date = last_date.tz_convert("UTC")
-
-            if (today_ts - last_date).days > 10:
+            last_date_py = pd.to_datetime(hist[-1][0]).to_pydatetime().replace(tzinfo=None)
+            if (today - last_date_py).days > 10:
                 status = "🚨 POSSIBLE SUSPENSION"
                 note = "No recent payment"
 
@@ -264,20 +208,4 @@ with tabs[1]:
 
     st.dataframe(pd.DataFrame(div_rows), use_container_width=True)
 
-# ========================= NEWS =============================
-with tabs[2]:
-    st.subheader("📰 ETF • Market • Stock News")
-    for tkr in etf_list:
-        st.markdown(f"### 🔹 {tkr}")
-        for n in get_news(NEWS_FEEDS[tkr]["etf"]):
-            st.markdown(f"- [{n.title}]({n.link})")
-        for n in get_news(NEWS_FEEDS[tkr]["market"]):
-            st.markdown(f"- [{n.title}]({n.link})")
-        for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
-            st.markdown(f"- [{n.title}]({n.link})")
-        st.divider()
-
-# ===================== PORTFOLIO & SNAPSHOTS ========================
-# (UNCHANGED — left exactly as your working version)
-
-st.caption("v3.10.4 • Dividend cut & suspension monitor added safely • Based on last working build")
+st.caption("v3.10.5 • Dividend monitor added • timezone-safe • based on last stable build")
