@@ -170,12 +170,12 @@ with tabs[1]:
     st.metric("Overall Market Condition", market_state)
     st.divider()
 
-    # ===== OPTION A FIXED: DIVIDEND CHANGE & SUSPENSION MONITOR =====
+    # ===== DIVIDEND CHANGE & SUSPENSION MONITOR (TZ SAFE) =====
 
     st.subheader("🛡 Dividend Change & Suspension Monitor")
 
     div_rows = []
-    today = datetime.today()
+    today_ts = pd.Timestamp.utcnow().tz_localize("UTC")
 
     for t in etf_list:
         hist = get_dividend_history(t)
@@ -197,8 +197,16 @@ with tabs[1]:
 
         if hist:
             last_date = hist[-1][0]
-            last_date_py = pd.to_datetime(last_date).to_pydatetime()
-            if (today - last_date_py).days > 10:
+            last_date_ts = pd.to_datetime(last_date)
+
+            if last_date_ts.tzinfo is None:
+                last_date_ts = last_date_ts.tz_localize("UTC")
+            else:
+                last_date_ts = last_date_ts.tz_convert("UTC")
+
+            days_since = (today_ts - last_date_ts).days
+
+            if days_since > 10:
                 status = "🚨 POSSIBLE SUSPENSION"
                 note = "No recent payment"
 
@@ -212,4 +220,4 @@ with tabs[1]:
     div_df = pd.DataFrame(div_rows)
     st.dataframe(div_df, use_container_width=True)
 
-st.caption("v3.10.1 • Fixed dividend date TypeError • No features removed")
+st.caption("v3.10.3 • Timezone-safe dividend comparison • No features removed")
