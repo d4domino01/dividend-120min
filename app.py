@@ -191,23 +191,21 @@ with tabs[1]:
         scores.append((t, score))
 
     scores_sorted = sorted(scores, key=lambda x: x[1], reverse=True)
-
     avg_score = sum(s for _, s in scores) / len(scores)
 
-    if avg_score > 0:
-        market_state = "🟢 STRONG"
+    if avg_score > 50:
+        market_state = "🟢 STRONG – Favor adding positions"
     elif avg_score < 0:
-        market_state = "🔴 WEAK"
+        market_state = "🔴 WEAK – Protect capital"
     else:
-        market_state = "🟡 NEUTRAL"
+        market_state = "🟡 MIXED – Selective buys only"
 
     st.metric("Overall Market Condition", market_state)
-
     st.divider()
 
     strat_rows = []
     for t, score in scores_sorted:
-        if score > 0:
+        if score > 50:
             action = "BUY MORE"
         elif score < 0:
             action = "CAUTION"
@@ -226,14 +224,70 @@ with tabs[1]:
 
     styled_strat = (
         strat_df.style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d Impact ($)", "28d Impact ($)", "Momentum Score"])
+        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444",
+                  subset=["14d Impact ($)", "28d Impact ($)", "Momentum Score"])
         .format("{:+,.2f}", subset=["14d Impact ($)", "28d Impact ($)", "Momentum Score"])
     )
 
+    st.subheader("📈 Momentum & Trade Bias")
     st.dataframe(styled_strat, use_container_width=True)
 
+    st.divider()
+
+    risk_rows = []
+    for t in etf_list:
+        spread = abs(impact_28d[t] - impact_14d[t])
+        if spread > 150:
+            risk = "HIGH"
+        elif spread > 50:
+            risk = "MEDIUM"
+        else:
+            risk = "LOW"
+
+        risk_rows.append({
+            "Ticker": t,
+            "Volatility Spread ($)": round(spread, 2),
+            "Risk Level": risk
+        })
+
+    risk_df = pd.DataFrame(risk_rows)
+
+    st.subheader("⚠️ Risk Level by ETF")
+    st.dataframe(risk_df, use_container_width=True)
+
     best_etf = scores_sorted[0][0]
-    st.info(f"📌 **New cash should be directed toward:** {best_etf}")
+
+    st.subheader("💰 Capital Allocation Suggestion")
+    st.info(
+        f"Allocate new capital to **{best_etf}** (strongest momentum). "
+        f"Avoid splitting across ETFs for now."
+    )
+
+    st.subheader("🛡 Dividend Stability Check")
+
+    stability_rows = []
+    for t in etf_list:
+        if impact_28d[t] < 0 and df[df.Ticker == t]["Weekly Income ($)"].iloc[0] > 20:
+            flag = "⚠️ WATCH"
+        else:
+            flag = "OK"
+
+        stability_rows.append({
+            "Ticker": t,
+            "Weekly Income ($)": df[df.Ticker == t]["Weekly Income ($)"].iloc[0],
+            "28d Impact ($)": impact_28d[t],
+            "Dividend Risk": flag
+        })
+
+    stab_df = pd.DataFrame(stability_rows)
+    st.dataframe(stab_df, use_container_width=True)
+
+    st.subheader("✅ Strategy Summary")
+    st.markdown(f"• Market condition: **{market_state}**")
+    st.markdown(f"• Strongest ETF: **{best_etf}**")
+    st.markdown("• Focus new money on the strongest ETF")
+    st.markdown("• Watch any ETF with falling price but high income")
+    st.markdown("• Weekly ETFs = expect volatility")
 
 # ========================= NEWS =============================
 with tabs[2]:
@@ -364,4 +418,4 @@ with tabs[4]:
         )
         st.dataframe(styled_stats, use_container_width=True)
 
-st.caption("v3.8 • Strategy tab restored • Snapshot v2 isolated • All tabs preserved")
+st.caption("v3.9 • Strategy tab fully restored • Snapshot v2 stable • All sections active")
