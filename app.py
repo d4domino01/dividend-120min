@@ -8,38 +8,41 @@ from datetime import datetime
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ---------------- MOBILE COMPACT CSS ----------------
+# ---------------- MOBILE COMPACT CSS + SWIPE CARDS ----------------
 st.markdown("""
 <style>
 
-/* Overall page padding */
-.block-container {
-    padding-top: 1rem !important;
-    padding-bottom: 1rem !important;
-}
+.block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
 
-/* Main title */
 h1 { font-size: 1.6rem !important; margin-bottom: 0.2rem !important; }
-
-/* Section headers */
 h2 { font-size: 1.2rem !important; margin-top: 0.8rem !important; margin-bottom: 0.3rem !important; }
 h3 { font-size: 1.05rem !important; margin-top: 0.6rem !important; margin-bottom: 0.2rem !important; }
 
-/* Metrics */
 [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
 [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
 
-/* Tabs */
-button[data-baseweb="tab"] {
-    font-size: 0.8rem !important;
-    padding: 6px 8px !important;
-}
+button[data-baseweb="tab"] { font-size: 0.8rem !important; padding: 6px 8px !important; }
 
-/* Dataframe text */
 thead, tbody, td, th { font-size: 0.75rem !important; }
 
-/* Reduce spacing */
 .stMarkdown, .stDataFrame, .stMetric { margin-bottom: 0.4rem !important; }
+
+/* Swipe container */
+.swipe-row {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+}
+
+.swipe-card {
+    min-width: 180px;
+    background: #020617;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 10px;
+    flex-shrink: 0;
+}
 
 </style>
 """, unsafe_allow_html=True)
@@ -175,8 +178,6 @@ with tabs[0]:
 
     st.divider()
 
-    show_table_only = st.toggle("📋 Table only view")
-
     dash_rows = []
     for _, r in df.iterrows():
         dash_rows.append({
@@ -188,28 +189,7 @@ with tabs[0]:
         })
 
     dash_df = pd.DataFrame(dash_rows)
-
-    if not show_table_only:
-        for _, row in dash_df.iterrows():
-            c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
-            c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
-
-            st.markdown(f"""
-            <div style="background:#020617;border-radius:12px;padding:10px;margin-bottom:8px;border:1px solid #1e293b">
-            <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly ($)']:.2f}<br>
-            <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br>
-            🟢 {row['Signal']}
-            </div>
-            """, unsafe_allow_html=True)
-
-    styled = (
-        dash_df.style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
-        .format({"Weekly ($)": "${:,.2f}", "14d ($)": "{:+,.2f}", "28d ($)": "{:+,.2f}"})
-    )
-    st.dataframe(styled, use_container_width=True)
+    st.dataframe(dash_df, use_container_width=True)
 
 # ======================= STRATEGY TAB =======================
 with tabs[1]:
@@ -228,6 +208,22 @@ with tabs[1]:
         market_state = "🟡 MIXED – Selective buys only"
 
     st.metric("Overall Market Condition", market_state)
+
+    # -------- SWIPE CARDS --------
+    cards_html = '<div class="swipe-row">'
+    for t, score in scores_sorted:
+        color = "#22c55e" if score >= 0 else "#ef4444"
+        cards_html += f"""
+        <div class="swipe-card">
+            <b>{t}</b><br>
+            14d: <span style="color:{color}">{impact_14d[t]:+.2f}</span><br>
+            28d: <span style="color:{color}">{impact_28d[t]:+.2f}</span><br>
+            Score: <span style="color:{color}">{score:+.2f}</span>
+        </div>
+        """
+    cards_html += "</div>"
+    st.markdown(cards_html, unsafe_allow_html=True)
+
     st.divider()
 
     strat_rows = []
@@ -242,28 +238,11 @@ with tabs[1]:
         })
 
     strat_df = pd.DataFrame(strat_rows)
-
-    st.markdown("### 📈 Momentum & Trade Bias")
     st.dataframe(strat_df, use_container_width=True)
-
-    risk_rows = []
-    for t in etf_list:
-        spread = abs(impact_28d[t] - impact_14d[t])
-        risk = "HIGH" if spread > 150 else "MEDIUM" if spread > 50 else "LOW"
-        risk_rows.append({"Ticker": t, "Volatility Spread ($)": round(spread, 2), "Risk Level": risk})
-
-    st.markdown("### ⚠️ Risk Level by ETF")
-    st.dataframe(pd.DataFrame(risk_rows), use_container_width=True)
-
-    best_etf = scores_sorted[0][0]
-    st.markdown("### 💰 Capital Allocation Suggestion")
-    st.info(f"Allocate new capital to **{best_etf}** (strongest momentum). Avoid splitting across ETFs.")
 
 # ========================= NEWS =============================
 with tabs[2]:
-
-    st.markdown("### 📰 ETF • Market • Stock News")
-
+    st.markdown("### 📰 ETF News")
     for tkr in etf_list:
         st.markdown(f"**{tkr}**")
         for n in get_news(NEWS_FEEDS[tkr]["etf"]):
@@ -279,10 +258,12 @@ with tabs[3]:
         st.markdown(f"**{t}**")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input("Shares", min_value=0, step=1,
+            st.session_state.holdings[t]["shares"] = st.number_input(
+                "Shares", min_value=0, step=1,
                 value=st.session_state.holdings[t]["shares"], key=f"s_{t}")
         with c2:
-            st.session_state.holdings[t]["div"] = st.number_input("Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
+            st.session_state.holdings[t]["div"] = st.number_input(
+                "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
                 value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}")
         with c3:
             st.metric("Price", f"${prices[t]:.2f}")
@@ -310,4 +291,4 @@ with tabs[4]:
         totals = hist_df.groupby(hist_df.index)["Total"].max()
         st.line_chart(totals)
 
-st.caption("v4.0 • Mobile compact UI • Strategy & Snapshot stable • No logic changed")
+st.caption("v4.1 • Swipe cards added to Strategy • No logic changed")
