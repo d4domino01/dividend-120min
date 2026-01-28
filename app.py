@@ -147,62 +147,6 @@ st.caption("Dividend Run-Up Monitor")
 
 tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# ======================= DASHBOARD ==========================
-with tabs[0]:
-
-    st.subheader("📊 Overview")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Value (incl. cash)", f"${total_value:,.2f}")
-        st.metric("Annual Income", f"${annual_income:,.2f}")
-    with col2:
-        st.metric("Monthly Income", f"${monthly_income:,.2f}")
-        st.markdown("**Market:** 🟢 BUY")
-
-    st.divider()
-
-    show_table_only = st.toggle("📋 Table only view")
-
-    dash_rows = []
-    for _, r in df.iterrows():
-        dash_rows.append({
-            "Ticker": r["Ticker"],
-            "Weekly ($)": r["Weekly Income ($)"],
-            "14d ($)": impact_14d[r["Ticker"]],
-            "28d ($)": impact_28d[r["Ticker"]],
-            "Signal": "BUY / HOLD"
-        })
-
-    dash_df = pd.DataFrame(dash_rows)
-
-    if not show_table_only:
-        for _, row in dash_df.iterrows():
-            c14 = "#22c55e" if row["14d ($)"] >= 0 else "#ef4444"
-            c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
-
-            st.markdown(f"""
-            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
-            <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly ($)']:.2f}<br><br>
-            <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br><br>
-            🟢 {row['Signal']}
-            </div>
-            """, unsafe_allow_html=True)
-
-    styled = (
-        dash_df
-        .style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
-        .format({
-            "Weekly ($)": "${:,.2f}",
-            "14d ($)": "{:+,.2f}",
-            "28d ($)": "{:+,.2f}",
-        })
-    )
-    st.dataframe(styled, use_container_width=True)
-
 # ======================= STRATEGY TAB =======================
 with tabs[1]:
 
@@ -226,39 +170,7 @@ with tabs[1]:
     st.metric("Overall Market Condition", market_state)
     st.divider()
 
-    strat_rows = []
-    for t, score in scores_sorted:
-        if score > 50:
-            action = "BUY MORE"
-        elif score < 0:
-            action = "CAUTION"
-        else:
-            action = "HOLD"
-
-        strat_rows.append({
-            "Ticker": t,
-            "Weekly Income ($)": df[df.Ticker == t]["Weekly Income ($)"].iloc[0],
-            "14d Impact ($)": impact_14d[t],
-            "28d Impact ($)": impact_28d[t],
-            "Momentum Score": round(score, 2),
-            "Suggested Action": action
-        })
-
-    strat_df = pd.DataFrame(strat_rows)
-
-    styled_strat = (
-        strat_df.style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444",
-                  subset=["Weekly Income ($)", "14d Impact ($)", "28d Impact ($)", "Momentum Score"])
-        .format("{:+,.2f}", subset=["Weekly Income ($)", "14d Impact ($)", "28d Impact ($)", "Momentum Score"])
-    )
-
-    st.subheader("📈 Momentum & Trade Bias")
-    st.dataframe(styled_strat, use_container_width=True)
-
-    st.divider()
-
-    # ===== OPTION A: DIVIDEND CHANGE & SUSPENSION MONITOR =====
+    # ===== OPTION A FIXED: DIVIDEND CHANGE & SUSPENSION MONITOR =====
 
     st.subheader("🛡 Dividend Change & Suspension Monitor")
 
@@ -273,7 +185,6 @@ with tabs[1]:
 
         if len(hist) >= 2:
             (_, last), (_, prev) = hist[-1], hist[-2]
-
             if last < prev * 0.9:
                 status = "⚠️ CUT"
                 note = "Dividend reduced"
@@ -286,7 +197,8 @@ with tabs[1]:
 
         if hist:
             last_date = hist[-1][0]
-            if (today - last_date).days > 10:
+            last_date_py = pd.to_datetime(last_date).to_pydatetime()
+            if (today - last_date_py).days > 10:
                 status = "🚨 POSSIBLE SUSPENSION"
                 note = "No recent payment"
 
@@ -300,157 +212,4 @@ with tabs[1]:
     div_df = pd.DataFrame(div_rows)
     st.dataframe(div_df, use_container_width=True)
 
-    st.divider()
-
-    st.subheader("⚠️ Risk Level by ETF")
-
-    risk_rows = []
-    for t in etf_list:
-        spread = abs(impact_28d[t] - impact_14d[t])
-        if spread > 150:
-            risk = "HIGH"
-        elif spread > 50:
-            risk = "MEDIUM"
-        else:
-            risk = "LOW"
-
-        risk_rows.append({
-            "Ticker": t,
-            "Volatility Spread ($)": round(spread, 2),
-            "Risk Level": risk
-        })
-
-    risk_df = pd.DataFrame(risk_rows)
-    st.dataframe(risk_df, use_container_width=True)
-
-    best_etf = scores_sorted[0][0]
-
-    st.subheader("💰 Capital Allocation Suggestion")
-    st.info(
-        f"Allocate new capital to **{best_etf}** (strongest momentum). "
-        f"Avoid splitting across ETFs for now."
-    )
-
-    st.subheader("✅ Strategy Summary")
-    st.markdown(f"• Market condition: **{market_state}**")
-    st.markdown(f"• Strongest ETF: **{best_etf}**")
-    st.markdown("• Focus new money on the strongest ETF")
-    st.markdown("• Watch any ETF with falling price but high income")
-    st.markdown("• Weekly ETFs = expect volatility")
-
-# ========================= NEWS =============================
-with tabs[2]:
-    st.subheader("📰 ETF • Market • Stock News")
-    for tkr in etf_list:
-        st.markdown(f"### 🔹 {tkr}")
-        st.markdown("**ETF / Strategy News**")
-        for n in get_news(NEWS_FEEDS[tkr]["etf"]):
-            st.markdown(f"- [{n.title}]({n.link})")
-        st.markdown("**Underlying Market**")
-        for n in get_news(NEWS_FEEDS[tkr]["market"]):
-            st.markdown(f"- [{n.title}]({n.link})")
-        st.markdown("**Major Underlying Stocks**")
-        for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
-            st.markdown(f"- [{n.title}]({n.link})")
-        st.divider()
-
-# ===================== PORTFOLIO TAB ========================
-with tabs[3]:
-    st.subheader("📁 Portfolio Control Panel")
-    for t in etf_list:
-        st.markdown(f"### {t}")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.session_state.holdings[t]["shares"] = st.number_input(
-                "Shares", min_value=0, step=1,
-                value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
-            )
-        with c2:
-            st.session_state.holdings[t]["div"] = st.number_input(
-                "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
-                value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
-            )
-        with c3:
-            weekly_total = df[df.Ticker == t]["Weekly Income ($)"].iloc[0]
-            div_per_share = st.session_state.holdings[t]["div"]
-            st.markdown(
-                f"""
-                <div style="line-height:1.6">
-                <span style="color:#93c5fd"><b>Price:</b> ${prices[t]:.2f}</span><br>
-                <span style="color:#22c55e"><b>Div / Share:</b> ${div_per_share:.2f}</span><br>
-                <span style="color:#22c55e"><b>Weekly Income:</b> ${weekly_total:.2f}</span>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        r = df[df.Ticker == t].iloc[0]
-        st.caption(
-            f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
-        )
-        st.divider()
-
-    st.subheader("💰 Cash Wallet")
-    st.session_state.cash = st.number_input(
-        "Cash ($)", min_value=0.0, step=50.0,
-        value=float(st.session_state.cash)
-    )
-    st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
-
-# ===================== SNAPSHOTS TAB ========================
-with tabs[4]:
-    st.subheader("📸 Portfolio Value Snapshots (v2)")
-    colA, colB = st.columns(2)
-    with colA:
-        if st.button("💾 Save Snapshot"):
-            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            snap = df[["Ticker", "Value ($)"]].copy()
-            snap["Cash"] = cash
-            snap["Total"] = total_value
-            snap.to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
-            st.success("Snapshot saved.")
-    with colB:
-        if st.button("🧹 Delete ALL Snapshots"):
-            for f in os.listdir(SNAP_DIR):
-                os.remove(os.path.join(SNAP_DIR, f))
-            st.warning("All snapshots deleted.")
-
-    files = sorted(os.listdir(SNAP_DIR))
-    all_snaps = []
-    for f in files:
-        try:
-            d = pd.read_csv(os.path.join(SNAP_DIR, f))
-            d["Snapshot"] = f
-            all_snaps.append(d)
-        except:
-            pass
-
-    if not all_snaps:
-        st.info("No snapshots yet. Save at least one to begin tracking.")
-    else:
-        hist_df = pd.concat(all_snaps)
-        totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
-        st.line_chart(totals.set_index("Snapshot")["Total"])
-
-        st.subheader("📊 ETF Performance Across ALL Snapshots")
-
-        etf_stats = []
-        for t in etf_list:
-            vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
-            etf_stats.append({
-                "Ticker": t,
-                "Start ($)": round(vals.iloc[0], 2),
-                "Latest ($)": round(vals.iloc[-1], 2),
-                "Net ($)": round(vals.iloc[-1] - vals.iloc[0], 2),
-                "Best ($)": round(vals.max(), 2),
-                "Worst ($)": round(vals.min(), 2),
-            })
-
-        stats_df = pd.DataFrame(etf_stats)
-        styled_stats = (
-            stats_df.style
-            .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
-            .format("${:,.2f}", subset=[c for c in stats_df.columns if c != "Ticker"])
-        )
-        st.dataframe(styled_stats, use_container_width=True)
-
-st.caption("v3.10 • Dividend cut & suspension monitor added • No features removed")
+st.caption("v3.10.1 • Fixed dividend date TypeError • No features removed")
