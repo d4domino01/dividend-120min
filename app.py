@@ -8,40 +8,10 @@ from datetime import datetime
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ===== MOBILE UI COMPACT CSS (OPTION B) =====
-st.markdown("""
-<style>
-/* Reduce main title */
-h1 { font-size: 1.6rem !important; margin-bottom: 0.3rem; }
-
-/* Section headers */
-h2 { font-size: 1.25rem !important; margin-top: 0.6rem; }
-h3 { font-size: 1.05rem !important; margin-top: 0.5rem; }
-
-/* Metrics */
-[data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-[data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
-
-/* Reduce padding in containers */
-.block-container { padding-top: 0.8rem !important; padding-bottom: 0.8rem !important; }
-
-/* Card markdown spacing */
-div[data-testid="stMarkdownContainer"] { margin-bottom: 0.4rem; }
-
-/* Dataframe text */
-thead th, tbody td { font-size: 0.8rem !important; }
-
-/* Tabs spacing */
-button[data-baseweb="tab"] { padding: 6px 10px !important; font-size: 0.8rem !important; }
-</style>
-""", unsafe_allow_html=True)
-# ===== END UI CSS =====
-
-
 # ---------------- ETF LIST ----------------
 etf_list = ["QDTE", "CHPY", "XDTE"]
 
-# ---------------- SNAPSHOT DIR (V2) ----------------
+# ---------------- SNAPSHOT DIR (V2 ONLY) ----------------
 SNAP_DIR = "snapshots_v2"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
@@ -189,11 +159,11 @@ with tabs[0]:
             c28 = "#22c55e" if row["28d ($)"] >= 0 else "#ef4444"
 
             st.markdown(f"""
-            <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
+            <div style="background:#020617;border-radius:12px;padding:12px;margin-bottom:10px;border:1px solid #1e293b;font-size:14px">
             <b>{row['Ticker']}</b><br>
-            Weekly: ${row['Weekly ($)']:.2f}<br><br>
+            Weekly: ${row['Weekly ($)']:.2f}<br>
             <span style="color:{c14}">14d {row['14d ($)']:+.2f}</span> |
-            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br><br>
+            <span style="color:{c28}">28d {row['28d ($)']:+.2f}</span><br>
             🟢 {row['Signal']}
             </div>
             """, unsafe_allow_html=True)
@@ -304,7 +274,7 @@ with tabs[1]:
 
         stability_rows.append({
             "Ticker": t,
-            "Weekly Income ($)": df[df.Ticker == t]["Weekly Income ($)"]].iloc[0],
+            "Weekly Income ($)": df[df.Ticker == t]["Weekly Income ($)"].iloc[0],
             "28d Impact ($)": impact_28d[t],
             "Dividend Risk": flag
         })
@@ -448,4 +418,4 @@ with tabs[4]:
         )
         st.dataframe(styled_stats, use_container_width=True)
 
-st.caption("v3.9-uiB • Compact mobile UI • Logic untouched")
+st.caption("v3.9-uiB • Compact mobile UI • Logic unchanged • Snapshot v2 active")
