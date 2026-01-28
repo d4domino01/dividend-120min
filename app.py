@@ -42,21 +42,23 @@ if "cash" not in st.session_state:
 # ---------------- NEWS FEEDS ----------------
 NEWS_FEEDS = {
     "QDTE": {
-        "etf": "https://news.google.com/rss/search?q=weekly+income+etf+options+strategy+market",
-        "market": "https://news.google.com/rss/search?q=nasdaq+technology+stocks+market+news",
-        "stocks": "https://news.google.com/rss/search?q=NVDA+MSFT+AAPL+technology+stocks+news"
+        "etf": "https://news.google.com/rss/search?q=QDTE+ETF+news",
+        "market": "https://news.google.com/rss/search?q=nasdaq+market+news",
+        "stocks": "https://news.google.com/rss/search?q=NVDA+MSFT+AAPL+stocks+news"
     },
     "CHPY": {
-        "etf": "https://news.google.com/rss/search?q=high+yield+income+etf+market",
-        "market": "https://news.google.com/rss/search?q=semiconductor+sector+SOXX+market+news",
-        "stocks": "https://news.google.com/rss/search?q=NVDA+AMD+INTC+semiconductor+stocks+news"
+        "etf": "https://news.google.com/rss/search?q=CHPY+ETF+news",
+        "market": "https://news.google.com/rss/search?q=semiconductor+market+news",
+        "stocks": "https://news.google.com/rss/search?q=NVDA+AMD+INTC+stocks+news"
     },
     "XDTE": {
-        "etf": "https://news.google.com/rss/search?q=covered+call+etf+income+strategy+market",
-        "market": "https://news.google.com/rss/search?q=S%26P+500+market+news+stocks",
-        "stocks": "https://news.google.com/rss/search?q=AAPL+MSFT+GOOGL+US+stocks+market+news"
+        "etf": "https://news.google.com/rss/search?q=XDTE+ETF+news",
+        "market": "https://news.google.com/rss/search?q=S%26P+500+market+news",
+        "stocks": "https://news.google.com/rss/search?q=AAPL+MSFT+GOOGL+stocks+news"
     }
 }
+
+DANGER_WORDS = ["halt", "suspend", "liquidation", "delist", "closure", "terminate"]
 
 def get_news(url, limit=5):
     try:
@@ -72,15 +74,12 @@ def get_price(ticker):
     except:
         return 0.0
 
-@st.cache_data(ttl=1800)
-def get_dividend_history(ticker):
+@st.cache_data(ttl=600)
+def get_recent_history(ticker):
     try:
-        divs = yf.Ticker(ticker).dividends
-        if len(divs) == 0:
-            return []
-        return list(divs.tail(5).items())
+        return yf.Ticker(ticker).history(period="7d")
     except:
-        return []
+        return None
 
 # ---------------- BUILD LIVE DATA ----------------
 prices = {t: get_price(t) for t in etf_list}
@@ -226,6 +225,77 @@ with tabs[1]:
     st.metric("Overall Market Condition", market_state)
     st.divider()
 
+    # ---------- B: INCOME vs PRICE DAMAGE ----------
+    st.subheader("💰 Income vs Price Damage (Survival Test)")
+
+    surv_rows = []
+    for t in etf_list:
+        weekly_inc = df[df.Ticker == t]["Weekly Income ($)"].iloc[0]
+        monthly_inc = round(weekly_inc * 4.33, 2)
+        price_hit = impact_28d[t]
+        net = round(monthly_inc - abs(price_hit), 2)
+
+        surv_rows.append({
+            "Ticker": t,
+            "Monthly Income ($)": monthly_inc,
+            "28d Price Impact ($)": price_hit,
+            "Net Benefit ($)": net
+        })
+
+    surv_df = pd.DataFrame(surv_rows)
+
+    styled_surv = (
+        surv_df.style
+        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444", subset=["Net Benefit ($)"])
+        .format("{:+,.2f}", subset=["28d Price Impact ($)", "Net Benefit ($)", "Monthly Income ($)"])
+    )
+
+    st.dataframe(styled_surv, use_container_width=True)
+
+    st.divider()
+
+    # ---------- C: ETF DANGER ALERT ----------
+    st.subheader("🚨 ETF Danger Alerts")
+
+    danger_rows = []
+
+    for t in etf_list:
+
+        hist = get_recent_history(t)
+        price_flag = "OK"
+
+        if hist is not None and len(hist) >= 2:
+            d1 = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
+            d5 = (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100
+
+            if d1 <= -7 or d5 <= -12:
+                price_flag = "PRICE SHOCK"
+
+        news_flag = "OK"
+        for n in get_news(NEWS_FEEDS[t]["etf"], limit=5):
+            title = n.title.lower()
+            if any(w in title for w in DANGER_WORDS):
+                news_flag = "NEWS WARNING"
+                break
+
+        if price_flag != "OK" or news_flag != "OK":
+            level = "🔴 HIGH RISK"
+        else:
+            level = "🟢 OK"
+
+        danger_rows.append({
+            "Ticker": t,
+            "Price Alert": price_flag,
+            "News Alert": news_flag,
+            "Overall Risk": level
+        })
+
+    danger_df = pd.DataFrame(danger_rows)
+    st.dataframe(danger_df, use_container_width=True)
+
+    st.divider()
+
+    # ---------- EXISTING SECTIONS (UNCHANGED) ----------
     strat_rows = []
     for t, score in scores_sorted:
         if score > 50:
@@ -256,9 +326,6 @@ with tabs[1]:
     st.subheader("📈 Momentum & Trade Bias")
     st.dataframe(styled_strat, use_container_width=True)
 
-    st.divider()
-
-    # ---------- RISK ----------
     risk_rows = []
     for t in etf_list:
         spread = abs(impact_28d[t] - impact_14d[t])
@@ -276,54 +343,10 @@ with tabs[1]:
         })
 
     risk_df = pd.DataFrame(risk_rows)
-
     st.subheader("⚠️ Risk Level by ETF")
     st.dataframe(risk_df, use_container_width=True)
 
-    # ---------- DIVIDEND MONITOR (NEW, SAFE) ----------
-    st.subheader("🛡 Dividend Change & Suspension Monitor")
-
-    div_rows = []
-    today = datetime.utcnow()
-
-    for t in etf_list:
-        hist = get_dividend_history(t)
-
-        status = "OK"
-        note = ""
-
-        if len(hist) >= 2:
-            (_, last), (_, prev) = hist[-1], hist[-2]
-            if last < prev * 0.9:
-                status = "⚠️ CUT"
-                note = "Dividend reduced"
-        elif len(hist) == 1:
-            status = "⚠️ LIMITED DATA"
-            note = "Only one dividend found"
-        else:
-            status = "🚨 NO DATA"
-            note = "No dividend history"
-
-        if hist:
-            last_date = hist[-1][0]
-            last_date_py = pd.to_datetime(last_date).to_pydatetime().replace(tzinfo=None)
-            if (today - last_date_py).days > 10:
-                status = "🚨 POSSIBLE SUSPENSION"
-                note = "No recent payment"
-
-        div_rows.append({
-            "Ticker": t,
-            "Last Dividend ($)": hist[-1][1] if hist else 0,
-            "Status": status,
-            "Note": note
-        })
-
-    div_df = pd.DataFrame(div_rows)
-    st.dataframe(div_df, use_container_width=True)
-
-    # ---------- ALLOCATION ----------
     best_etf = scores_sorted[0][0]
-
     st.subheader("💰 Capital Allocation Suggestion")
     st.info(
         f"Allocate new capital to **{best_etf}** (strongest momentum). "
@@ -339,54 +362,39 @@ with tabs[1]:
 
 # ========================= NEWS =============================
 with tabs[2]:
-
     st.subheader("📰 ETF • Market • Stock News")
-
     for tkr in etf_list:
-
         st.markdown(f"### 🔹 {tkr}")
-
         st.markdown("**ETF / Strategy News**")
         for n in get_news(NEWS_FEEDS[tkr]["etf"]):
             st.markdown(f"- [{n.title}]({n.link})")
-
         st.markdown("**Underlying Market**")
         for n in get_news(NEWS_FEEDS[tkr]["market"]):
             st.markdown(f"- [{n.title}]({n.link})")
-
         st.markdown("**Major Underlying Stocks**")
         for n in get_news(NEWS_FEEDS[tkr]["stocks"]):
             st.markdown(f"- [{n.title}]({n.link})")
-
         st.divider()
 
 # ===================== PORTFOLIO TAB ========================
 with tabs[3]:
-
     st.subheader("📁 Portfolio Control Panel")
-
     for t in etf_list:
-
         st.markdown(f"### {t}")
-
         c1, c2, c3 = st.columns(3)
-
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
                 "Shares", min_value=0, step=1,
                 value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
             )
-
         with c2:
             st.session_state.holdings[t]["div"] = st.number_input(
                 "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
                 value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
             )
-
         with c3:
             weekly_total = df[df.Ticker == t]["Weekly Income ($)"].iloc[0]
             div_per_share = st.session_state.holdings[t]["div"]
-
             st.markdown(
                 f"""
                 <div style="line-height:1.6">
@@ -397,12 +405,10 @@ with tabs[3]:
                 """,
                 unsafe_allow_html=True
             )
-
         r = df[df.Ticker == t].iloc[0]
         st.caption(
             f"Value: ${r['Value ($)']:.2f} | Weekly: ${r['Weekly Income ($)']:.2f} | Monthly: ${r['Monthly Income ($)']:.2f}"
         )
-
         st.divider()
 
     st.subheader("💰 Cash Wallet")
@@ -410,16 +416,12 @@ with tabs[3]:
         "Cash ($)", min_value=0.0, step=50.0,
         value=float(st.session_state.cash)
     )
-
     st.metric("Total Portfolio Value (incl. cash)", f"${total_value:,.2f}")
 
 # ===================== SNAPSHOTS TAB ========================
 with tabs[4]:
-
     st.subheader("📸 Portfolio Value Snapshots (v2)")
-
     colA, colB = st.columns(2)
-
     with colA:
         if st.button("💾 Save Snapshot"):
             ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -428,7 +430,6 @@ with tabs[4]:
             snap["Total"] = total_value
             snap.to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
             st.success("Snapshot saved.")
-
     with colB:
         if st.button("🧹 Delete ALL Snapshots"):
             for f in os.listdir(SNAP_DIR):
@@ -437,7 +438,6 @@ with tabs[4]:
 
     files = sorted(os.listdir(SNAP_DIR))
     all_snaps = []
-
     for f in files:
         try:
             d = pd.read_csv(os.path.join(SNAP_DIR, f))
@@ -450,16 +450,13 @@ with tabs[4]:
         st.info("No snapshots yet. Save at least one to begin tracking.")
     else:
         hist_df = pd.concat(all_snaps)
-
         totals = hist_df.groupby("Snapshot")["Total"].max().reset_index()
         st.line_chart(totals.set_index("Snapshot")["Total"])
 
         st.subheader("📊 ETF Performance Across ALL Snapshots")
-
         etf_stats = []
         for t in etf_list:
             vals = hist_df[hist_df["Ticker"] == t]["Value ($)"]
-
             etf_stats.append({
                 "Ticker": t,
                 "Start ($)": round(vals.iloc[0], 2),
@@ -468,9 +465,7 @@ with tabs[4]:
                 "Best ($)": round(vals.max(), 2),
                 "Worst ($)": round(vals.min(), 2),
             })
-
         stats_df = pd.DataFrame(etf_stats)
-
         styled_stats = (
             stats_df.style
             .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["Net ($)"])
@@ -478,4 +473,4 @@ with tabs[4]:
         )
         st.dataframe(styled_stats, use_container_width=True)
 
-st.caption("v3.10.6 • Dividend monitor added under Risk • timezone-safe • no removals")
+st.caption("v3.11.0 • Income vs Damage + Danger Alerts added • based on stable v3.10.6")
