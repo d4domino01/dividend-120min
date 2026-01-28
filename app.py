@@ -365,9 +365,9 @@ with tabs[1]:
 # ========================= NEWS =============================
 with tabs[2]:
 
-    st.subheader("📰 ETF News Sentiment Summary")
+    st.subheader("🧠 Market Temperament Summary")
 
-    summary_rows = []
+    summary_blocks = {}
 
     for tkr in etf_list:
         entries = []
@@ -385,21 +385,35 @@ with tabs[2]:
                 danger += 1
 
         if danger > 0:
-            tone = "🔴 High risk news present"
+            text = (
+                "Recent news includes warning signals such as trading halts, fund structure changes, "
+                "or operational concerns. This increases short-term risk and suggests caution with new capital."
+            )
         elif pos > neg:
-            tone = "🟢 Mostly positive tone"
+            text = (
+                "Coverage remains largely constructive, supported by favorable market conditions and "
+                "positive developments in underlying holdings. Income strategy remains attractive under current trends."
+            )
         elif neg > pos:
-            tone = "🟡 Cautious / mixed news"
+            text = (
+                "News flow is cautious, with concerns around volatility, earnings pressure, or sector pullbacks. "
+                "Income remains present, but capital risk is elevated in the short term."
+            )
         else:
-            tone = "🟡 Neutral tone"
+            text = (
+                "News is mixed and largely neutral, with no strong directional signals. "
+                "Price action may be driven more by overall market conditions than ETF-specific factors."
+            )
 
-        summary_rows.append({
-            "Ticker": tkr,
-            "News Sentiment": tone
-        })
+        summary_blocks[tkr] = text
 
-    summary_df = pd.DataFrame(summary_rows)
-    st.dataframe(summary_df, use_container_width=True)
+    for tkr in etf_list:
+        st.markdown(f"""
+        <div style="background:#020617;border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid #1e293b">
+        <b>{tkr}</b><br>
+        {summary_blocks[tkr]}
+        </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
 
