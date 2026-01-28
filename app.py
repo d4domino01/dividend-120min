@@ -175,7 +175,7 @@ with tabs[1]:
     st.subheader("🛡 Dividend Change & Suspension Monitor")
 
     div_rows = []
-    today_ts = pd.Timestamp.utcnow().normalize()
+    today = datetime.today()
 
     for t in etf_list:
         hist = get_dividend_history(t)
@@ -197,9 +197,8 @@ with tabs[1]:
 
         if hist:
             last_date = hist[-1][0]
-            last_ts = pd.to_datetime(last_date).normalize()
-
-            if (today_ts - last_ts).days > 10:
+            last_date_py = pd.to_datetime(last_date).to_pydatetime()
+            if (today - last_date_py).days > 10:
                 status = "🚨 POSSIBLE SUSPENSION"
                 note = "No recent payment"
 
@@ -213,4 +212,4 @@ with tabs[1]:
     div_df = pd.DataFrame(div_rows)
     st.dataframe(div_df, use_container_width=True)
 
-st.caption("v3.10.2 • Fixed timezone-safe dividend date comparison • No features removed")
+st.caption("v3.10.1 • Fixed dividend date TypeError • No features removed")
