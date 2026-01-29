@@ -13,7 +13,7 @@ st.markdown("""
 <style>
 .green {color:#22c55e;}
 .red {color:#ef4444;}
-.card {background:#0f172a;padding:12px;border-radius:12px;margin-bottom:10px;border:1px solid #1e293b;}
+.card {background:#0f172a;padding:12px;border-radius:12px;margin-bottom:8px;border:1px solid #1e293b;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,6 +62,13 @@ def get_price(t):
 def get_hist(t):
     try:
         return yf.Ticker(t).history(period="30d")
+    except:
+        return None
+
+@st.cache_data(ttl=600)
+def get_recent(t):
+    try:
+        return yf.Ticker(t).history(period="7d")
     except:
         return None
 
@@ -124,7 +131,7 @@ tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio"
 # ================= DASHBOARD =================
 with tabs[0]:
 
-    st.subheader("📊 Dashboard Overview")
+    st.subheader("📊 Overview")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Value", f"${total_value:,.2f}")
@@ -133,7 +140,7 @@ with tabs[0]:
 
     st.divider()
 
-    show_table_only = st.toggle("📋 Show table only")
+    show_table_only = st.toggle("📋 Table only view")
 
     dash_rows = []
     for t in etf_list:
@@ -146,33 +153,24 @@ with tabs[0]:
 
     dash_df = pd.DataFrame(dash_rows)
 
-    # ---- CARDS ----
     if not show_table_only:
-        for t in etf_list:
-            v14 = impact_14d[t]
-            v28 = impact_28d[t]
-            col14 = "green" if v14 >= 0 else "red"
-            col28 = "green" if v28 >= 0 else "red"
-            w = df[df.Ticker == t]["Weekly"].iloc[0]
+        for _, r in dash_df.iterrows():
+            c14 = "green" if r["14d ($)"] >= 0 else "red"
+            c28 = "green" if r["28d ($)"] >= 0 else "red"
 
             st.markdown(f"""
             <div class="card">
-            <b>{t}</b><br>
-            Weekly: ${w:.2f}<br>
-            <span class="{col14}">14d: {v14:+.2f}</span> |
-            <span class="{col28}">28d: {v28:+.2f}</span>
+            <b>{r['Ticker']}</b><br>
+            Weekly: ${r['Weekly ($)']:.2f}<br>
+            <span class="{c14}">14d: {r['14d ($)']:+.2f}</span> |
+            <span class="{c28}">28d: {r['28d ($)']:+.2f}</span>
             </div>
             """, unsafe_allow_html=True)
 
-    # ---- TABLE (ALWAYS VISIBLE) ----
     styled = (
         dash_df.style
-        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
-        .format({
-            "Weekly ($)": "${:,.2f}",
-            "14d ($)": "{:+,.2f}",
-            "28d ($)": "{:+,.2f}",
-        })
+        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
+        .format({"Weekly ($)": "${:,.2f}", "14d ($)": "{:+,.2f}", "28d ($)": "{:+,.2f}"})
     )
     st.dataframe(styled, use_container_width=True)
 
@@ -192,6 +190,7 @@ with tabs[1]:
 
     st.divider()
 
+    # ---- Income vs Price Damage ----
     st.subheader("💰 Income vs Price Damage")
 
     for t in etf_list:
@@ -212,10 +211,52 @@ with tabs[1]:
         </div>
         """, unsafe_allow_html=True)
 
+    st.divider()
+
+    # ---- Momentum Table ----
+    strat_rows = []
+    for t in etf_list:
+        score = impact_14d[t] + impact_28d[t]
+        action = "BUY" if score > 50 else "HOLD" if score > 0 else "CAUTION"
+
+        strat_rows.append({
+            "Ticker": t,
+            "Weekly ($)": df[df.Ticker == t]["Weekly"].iloc[0],
+            "14d ($)": impact_14d[t],
+            "28d ($)": impact_28d[t],
+            "Momentum": round(score, 2),
+            "Action": action
+        })
+
+    strat_df = pd.DataFrame(strat_rows)
+
+    styled_strat = (
+        strat_df.style
+        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
+                  subset=["Weekly ($)", "14d ($)", "28d ($)", "Momentum"])
+        .format("{:+,.2f}", subset=["Weekly ($)", "14d ($)", "28d ($)", "Momentum"])
+    )
+
+    st.subheader("📈 Momentum & Trade Bias")
+    st.dataframe(styled_strat, use_container_width=True)
+
+    # ---- Risk Table ----
+    risk_rows = []
+    for t in etf_list:
+        spread = abs(impact_28d[t] - impact_14d[t])
+        risk = "HIGH" if spread > 150 else "MEDIUM" if spread > 50 else "LOW"
+        risk_rows.append({"Ticker": t, "Spread ($)": round(spread, 2), "Risk": risk})
+
+    st.subheader("⚠️ Risk Level by ETF")
+    st.dataframe(pd.DataFrame(risk_rows), use_container_width=True)
+
+    best = max(strat_rows, key=lambda x: x["Momentum"])["Ticker"]
+    st.info(f"💰 Allocate new capital to **{best}** (strongest momentum).")
+
 # ================= NEWS =================
 with tabs[2]:
 
-    st.subheader("📰 ETF News Sentiment Summary")
+    st.subheader("🧠 ETF News Sentiment Summary")
 
     summaries = {}
 
@@ -225,18 +266,17 @@ with tabs[2]:
         danger = any(w in text for w in DANGER_WORDS)
 
         if danger:
-            summaries[t] = "Risk-related language detected (halts, closures, or trading issues). Monitor closely."
+            summaries[t] = "Coverage contains risk-related language such as trading halts or closures. Caution advised."
         elif len(articles) >= 4:
-            summaries[t] = "News flow is broadly positive and focused on income and strategy stability."
+            summaries[t] = "Tone is broadly constructive with focus on income strategy and performance."
         else:
-            summaries[t] = "Limited or mixed coverage with no strong directional signals."
+            summaries[t] = "Coverage is mixed or limited with no strong directional signal."
 
     for t in etf_list:
         st.info(f"**{t}** — {summaries[t]}")
 
     st.divider()
-
-    st.subheader("🗞 Full News Sources")
+    st.subheader("🗞 Full Sources")
 
     for t in etf_list:
         st.markdown(f"### 🔹 {t}")
@@ -267,9 +307,7 @@ with tabs[3]:
         st.divider()
 
     st.subheader("💰 Cash Wallet")
-    st.session_state.cash = st.number_input(
-        "Cash ($)", min_value=0.0, step=50.0, value=float(st.session_state.cash)
-    )
+    st.session_state.cash = st.number_input("Cash ($)", min_value=0.0, step=50.0, value=float(st.session_state.cash))
 
 # ================= SNAPSHOTS =================
 with tabs[4]:
@@ -293,4 +331,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.0 • Dashboard cards + toggle restored • all tabs active • color rules fixed")
+st.caption("v3.14.0 • dashboard cards+toggle restored • strategy fully restored • news summaries added • no tabs removed")
