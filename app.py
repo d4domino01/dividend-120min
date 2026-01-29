@@ -13,7 +13,7 @@ st.markdown("""
 <style>
 .green {color:#22c55e;}
 .red {color:#ef4444;}
-.card {background:#0f172a;padding:12px;border-radius:12px;margin-bottom:8px;}
+.card {background:#0f172a;padding:12px;border-radius:12px;margin-bottom:10px;border:1px solid #1e293b;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -124,7 +124,8 @@ tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio"
 # ================= DASHBOARD =================
 with tabs[0]:
 
-    st.subheader("📊 Overview")
+    st.subheader("📊 Dashboard Overview")
+
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Value", f"${total_value:,.2f}")
     c2.metric("Monthly Income", f"${monthly_income:,.2f}")
@@ -132,26 +133,53 @@ with tabs[0]:
 
     st.divider()
 
-    for t in etf_list:
-        v14 = impact_14d[t]
-        v28 = impact_28d[t]
-        col14 = "green" if v14 >= 0 else "red"
-        col28 = "green" if v28 >= 0 else "red"
-        w = df[df.Ticker == t]["Weekly"].iloc[0]
+    show_table_only = st.toggle("📋 Show table only")
 
-        st.markdown(f"""
-        <div class="card">
-        <b>{t}</b><br>
-        Weekly: ${w:.2f}<br>
-        <span class="{col14}">14d: {v14:+.2f}</span> |
-        <span class="{col28}">28d: {v28:+.2f}</span>
-        </div>
-        """, unsafe_allow_html=True)
+    dash_rows = []
+    for t in etf_list:
+        dash_rows.append({
+            "Ticker": t,
+            "Weekly ($)": df[df.Ticker == t]["Weekly"].iloc[0],
+            "14d ($)": impact_14d[t],
+            "28d ($)": impact_28d[t],
+        })
+
+    dash_df = pd.DataFrame(dash_rows)
+
+    # ---- CARDS ----
+    if not show_table_only:
+        for t in etf_list:
+            v14 = impact_14d[t]
+            v28 = impact_28d[t]
+            col14 = "green" if v14 >= 0 else "red"
+            col28 = "green" if v28 >= 0 else "red"
+            w = df[df.Ticker == t]["Weekly"].iloc[0]
+
+            st.markdown(f"""
+            <div class="card">
+            <b>{t}</b><br>
+            Weekly: ${w:.2f}<br>
+            <span class="{col14}">14d: {v14:+.2f}</span> |
+            <span class="{col28}">28d: {v28:+.2f}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ---- TABLE (ALWAYS VISIBLE) ----
+    styled = (
+        dash_df.style
+        .applymap(lambda v: "color:#22c55e" if v > 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
+        .format({
+            "Weekly ($)": "${:,.2f}",
+            "14d ($)": "{:+,.2f}",
+            "28d ($)": "{:+,.2f}",
+        })
+    )
+    st.dataframe(styled, use_container_width=True)
 
 # ================= STRATEGY =================
 with tabs[1]:
 
-    st.subheader("🧠 Strategy Engine — Combined Signals")
+    st.subheader("🧠 Strategy Signals")
 
     positives = sum(1 for t in etf_list if impact_28d[t] > 0)
 
@@ -163,7 +191,8 @@ with tabs[1]:
         st.error("🔴 DEFENSIVE — Protect capital")
 
     st.divider()
-    st.subheader("💰 Income vs Price Impact (Gain or Loss)")
+
+    st.subheader("💰 Income vs Price Damage")
 
     for t in etf_list:
         monthly = df[df.Ticker == t]["Monthly"].iloc[0]
@@ -196,31 +225,17 @@ with tabs[2]:
         danger = any(w in text for w in DANGER_WORDS)
 
         if danger:
-            summaries[t] = "Recent coverage includes risk-related language such as trading halts or closures. Caution is warranted."
+            summaries[t] = "Risk-related language detected (halts, closures, or trading issues). Monitor closely."
         elif len(articles) >= 4:
-            summaries[t] = "News tone is broadly constructive, focusing on income stability and strategy performance."
+            summaries[t] = "News flow is broadly positive and focused on income and strategy stability."
         else:
-            summaries[t] = "Coverage is mixed or limited with no strong directional signals."
-
-    mood_rows = []
-    for t in etf_list:
-        if "risk" in summaries[t]:
-            mood = "🔴 Cautious"
-        elif "constructive" in summaries[t]:
-            mood = "🟢 Positive"
-        else:
-            mood = "🟡 Mixed"
-        mood_rows.append({"Ticker": t, "Sentiment": mood})
-
-    st.dataframe(pd.DataFrame(mood_rows), use_container_width=True)
-
-    st.divider()
-    st.subheader("🧠 Market Temperament by ETF")
+            summaries[t] = "Limited or mixed coverage with no strong directional signals."
 
     for t in etf_list:
         st.info(f"**{t}** — {summaries[t]}")
 
     st.divider()
+
     st.subheader("🗞 Full News Sources")
 
     for t in etf_list:
@@ -278,4 +293,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.13.4 • crash-safe rendering • global color rules • tabs preserved • no removals")
+st.caption("v3.14.0 • Dashboard cards + toggle restored • all tabs active • color rules fixed")
