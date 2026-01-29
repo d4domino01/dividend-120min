@@ -278,6 +278,7 @@ with tabs[2]:
 
     st.subheader("🧭 ETF News Risk Indicators")
 
+    summaries = {}
     news_rows = []
 
     for t in etf_list:
@@ -286,17 +287,24 @@ with tabs[2]:
 
         if any(w in text for w in DANGER_WORDS):
             mood = "🔴 Risk"
+            summary = "Recent headlines include warning language such as halts, closures, or liquidation risk. Extra caution is advised before adding capital."
         elif len(articles) >= 4:
             mood = "🟢 Positive"
+            summary = "Coverage is generally constructive, focusing on income strategy performance and market participation rather than structural risk."
         else:
             mood = "🟡 Mixed"
+            summary = "News flow is limited or mixed with no strong positive or negative drivers currently dominating sentiment."
 
-        news_rows.append({
-            "Ticker": t,
-            "News Status": mood
-        })
+        summaries[t] = summary
+        news_rows.append({"Ticker": t, "News Status": mood})
 
     st.dataframe(pd.DataFrame(news_rows), use_container_width=True)
+
+    st.divider()
+    st.subheader("🧠 Market Temperament Summaries")
+
+    for t in etf_list:
+        st.info(f"**{t}** — {summaries[t]}")
 
     st.divider()
     st.subheader("🗞 Latest ETF Headlines")
@@ -381,4 +389,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.5 • News tab now includes ETF risk indicators + headlines • no features removed")
+st.caption("v3.14.6 • News summaries restored + risk table + headlines • no other tabs changed")
