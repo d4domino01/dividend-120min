@@ -152,7 +152,7 @@ with tabs[0]:
             st.markdown(f"""
             <div class="card">
             <b>{t}</b><br>
-            Weekly: ${w:.2f}<br>
+            Weekly: <span class="green">${w:.2f}</span><br>
             <span class="{col14}">14d: {v14:+.2f}</span> |
             <span class="{col28}">28d: {v28:+.2f}</span>
             </div>
@@ -171,7 +171,8 @@ with tabs[0]:
 
     styled = (
         dash_df.style
-        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444", subset=["14d ($)", "28d ($)"])
+        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
+                  subset=["14d ($)", "28d ($)"])
         .format({"Weekly ($)": "${:,.2f}", "14d ($)": "{:+,.2f}", "28d ($)": "{:+,.2f}"})
     )
     st.dataframe(styled, use_container_width=True)
@@ -197,45 +198,45 @@ with tabs[1]:
 
     for t in etf_list:
         price_28d = impact_28d.get(t, 0)
-        monthly_income = df[df.Ticker == t]["Monthly"].iloc[0]
+        monthly_inc = df[df.Ticker == t]["Monthly"].iloc[0]
         news_score, news_label = get_sentiment(t)
 
-        # -------- Distribution Stability Score --------
-        if monthly_income > abs(price_28d) * 1.5:
-            dist_score = "🟢 Stable"
-            dist_val = 2
-        elif monthly_income >= abs(price_28d):
-            dist_score = "🟡 Moderate"
-            dist_val = 1
+        if monthly_inc > abs(price_28d) * 1.5:
+            dist_score = "🟢 Stable"; dist_val = 2
+        elif monthly_inc >= abs(price_28d):
+            dist_score = "🟡 Moderate"; dist_val = 1
         else:
-            dist_score = "🔴 Unstable"
-            dist_val = -1
+            dist_score = "🔴 Unstable"; dist_val = -1
 
         if news_score < 0:
             signal = "🔴 AVOID"
-        elif price_28d < 0 and monthly_income < abs(price_28d):
+        elif price_28d < 0 and monthly_inc < abs(price_28d):
             signal = "🟡 HOLD"
         else:
             signal = "🟢 ADD"
 
-        score = 0
-        if price_28d > 0: score += 1
-        if monthly_income > 0: score += 1
-        score += news_score
-        score += dist_val
-
+        score = (1 if price_28d > 0 else 0) + (1 if monthly_inc > 0 else 0) + news_score + dist_val
         add_scores[t] = score
 
         strategy_rows.append({
             "Ticker": t,
             "28d Price ($)": round(price_28d, 2),
-            "Monthly Income ($)": round(monthly_income, 2),
+            "Monthly Income ($)": round(monthly_inc, 2),
             "Distribution Stability": dist_score,
             "News": news_label,
             "Signal": signal
         })
 
-    st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True)
+    strat_df = pd.DataFrame(strategy_rows)
+
+    styled_strat = (
+        strat_df.style
+        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
+                  subset=["28d Price ($)", "Monthly Income ($)"])
+        .format({"28d Price ($)": "{:+,.2f}", "Monthly Income ($)": "${:,.2f}"})
+    )
+
+    st.dataframe(styled_strat, use_container_width=True)
 
     st.divider()
     st.subheader("📊 Portfolio-Level Guidance")
@@ -274,7 +275,16 @@ with tabs[1]:
 
         danger_rows.append({"Ticker": t, "28d Price ($)": impact_28d[t], "Risk": danger})
 
-    st.dataframe(pd.DataFrame(danger_rows), use_container_width=True)
+    danger_df = pd.DataFrame(danger_rows)
+
+    styled_danger = (
+        danger_df.style
+        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
+                  subset=["28d Price ($)"])
+        .format({"28d Price ($)": "{:+,.2f}"})
+    )
+
+    st.dataframe(styled_danger, use_container_width=True)
 
     st.divider()
     st.subheader("📈 Momentum & Trade Bias")
@@ -354,15 +364,17 @@ with tabs[3]:
         annual_income = weekly_income * 52
         position_value = shares * price
 
+        def col(v): return "green" if v >= 0 else "red"
+
         with c3:
             st.markdown(f"""
             <div class="card">
             <b>Price:</b> ${price:.2f}<br>
-            <b>Dividend per share:</b> ${div:.2f}<br>
-            <b>Total weekly income:</b> ${weekly_income:.2f}<br>
-            <b>Total monthly income:</b> ${monthly_income:.2f}<br>
-            <b>Total annual income:</b> ${annual_income:.2f}<br>
-            <b>Position value:</b> ${position_value:,.2f}
+            <b>Dividend per share:</b> <span class="green">${div:.2f}</span><br>
+            <b>Total weekly income:</b> <span class="{col(weekly_income)}">${weekly_income:.2f}</span><br>
+            <b>Total monthly income:</b> <span class="{col(monthly_income)}">${monthly_income:.2f}</span><br>
+            <b>Total annual income:</b> <span class="{col(annual_income)}">${annual_income:.2f}</span><br>
+            <b>Position value:</b> <span class="{col(position_value)}">${position_value:,.2f}</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -396,4 +408,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.2 • Distribution Stability Score added • no other changes")
+st.caption("v3.14.3 • Global green/red applied to all $ values across all tabs")
