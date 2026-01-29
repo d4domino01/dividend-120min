@@ -179,145 +179,124 @@ with tabs[0]:
 # ================= STRATEGY =================
 with tabs[1]:
 
-    st.subheader("🧠 Strategy Signals")
+    st.subheader("🧠 Strategy Engine — Combined Signals")
 
-    # 1️⃣ Overall Market Condition
-    positives = sum(1 for t in etf_list if impact_28d[t] > 0)
-
-    if positives >= 2:
-        market_state = "🟢 STRONG — Favor adding positions"
-        st.success(market_state)
-    elif positives == 1:
-        market_state = "🟡 MIXED — Selective buys only"
-        st.warning(market_state)
-    else:
-        market_state = "🔴 WEAK — Protect capital"
-        st.error(market_state)
-
-    st.divider()
-
-    # 2️⃣ Income vs Price Damage
-    st.subheader("💰 Income vs Price Damage (Survival Test)")
+    strategy_rows = []
+    add_scores = {}
 
     for t in etf_list:
-        monthly = df[df.Ticker == t]["Monthly"].iloc[0]
-        price = impact_28d[t]
-        net = monthly + price
+        price_28d = impact_28d.get(t, 0)
 
-        c1 = "green" if monthly >= 0 else "red"
-        c2 = "green" if price >= 0 else "red"
-        c3 = "green" if net >= 0 else "red"
+        monthly_income = df[df.Ticker == t]["Monthly"].iloc[0]
 
-        st.markdown(f"""
-        <div class="card">
-        <b>{t}</b><br>
-        <span class="{c1}">Income: {monthly:+.2f}</span><br>
-        <span class="{c2}">Price Impact: {price:+.2f}</span><br>
-        <span class="{c3}"><b>Net: {net:+.2f}</b></span>
-        </div>
-        """, unsafe_allow_html=True)
+        summary = summaries.get(t, "").lower()
+
+        if "risk" in summary or "halt" in summary or "closure" in summary or "terminate" in summary:
+            news_score = -1
+            news_label = "🔴 Negative"
+        elif "constructive" in summary or "positive" in summary:
+            news_score = 1
+            news_label = "🟢 Positive"
+        else:
+            news_score = 0
+            news_label = "🟡 Mixed"
+
+        # ---- ETF SIGNAL LOGIC ----
+        if news_score < 0:
+            signal = "🔴 AVOID"
+        elif price_28d < 0 and monthly_income < abs(price_28d):
+            signal = "🟡 HOLD"
+        else:
+            signal = "🟢 ADD"
+
+        # ---- SCORE FOR BEST ETF ----
+        score = 0
+        if price_28d > 0:
+            score += 1
+        if monthly_income > 0:
+            score += 1
+        score += news_score
+
+        add_scores[t] = score
+
+        strategy_rows.append({
+            "Ticker": t,
+            "28d Price Impact ($)": round(price_28d, 2),
+            "Monthly Income ($)": round(monthly_income, 2),
+            "News": news_label,
+            "Signal": signal
+        })
+
+    strat_df = pd.DataFrame(strategy_rows)
+
+    st.dataframe(strat_df, use_container_width=True)
+
+    # ================= PORTFOLIO GUIDANCE =================
+
+    negatives = sum(1 for v in add_scores.values() if v < 0)
+    positives = sum(1 for v in add_scores.values() if v > 1)
 
     st.divider()
+    st.subheader("📊 Portfolio-Level Guidance")
 
-    # 3️⃣ ETF Danger Alerts
+    if negatives >= 2:
+        st.error("🔴 DEFENSIVE — Pause new buying, protect capital")
+    elif positives >= 2:
+        st.success("🟢 CONSTRUCTIVE — Add to strongest ETF")
+    else:
+        st.warning("🟡 SELECTIVE — Buy only on pullbacks")
+
+    # ================= BEST ETF TO ADD =================
+
+    best_etf = max(add_scores, key=lambda k: add_scores[k])
+
+    st.divider()
+    st.subheader("🎯 Best ETF to Add (if investing now)")
+
+    if add_scores[best_etf] > 0:
+        st.info(f"➡️ **{best_etf}** shows the best combination of price strength, income, and news sentiment.")
+    else:
+        st.warning("⚠️ No ETF currently shows a strong buy setup. Capital preservation favored.")
+
+    # ================= RISK WARNINGS =================
+
+    st.divider()
     st.subheader("🚨 ETF Danger Alerts")
 
     danger_rows = []
+
     for t in etf_list:
-        hist = get_hist(t)
-        price_flag = "OK"
+        summary = summaries.get(t, "").lower()
 
-        if hist is not None and len(hist) >= 2:
-            d1 = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
-            d5 = (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100
-            if d1 <= -7 or d5 <= -12:
-                price_flag = "PRICE SHOCK"
-
-        news_flag = "OK"
-        for n in get_news(NEWS_FEEDS[t], 6):
-            if any(w in n.title.lower() for w in DANGER_WORDS):
-                news_flag = "NEWS WARNING"
-                break
-
-        level = "🔴 HIGH RISK" if price_flag != "OK" or news_flag != "OK" else "🟢 OK"
+        if "halt" in summary or "suspend" in summary or "closure" in summary or "terminate" in summary:
+            danger = "🔴 HIGH"
+        elif impact_28d.get(t, 0) < 0:
+            danger = "🟡 WATCH"
+        else:
+            danger = "🟢 OK"
 
         danger_rows.append({
             "Ticker": t,
-            "Price Alert": price_flag,
-            "News Alert": news_flag,
-            "Overall Risk": level
+            "28d Price": round(impact_28d.get(t, 0), 2),
+            "Risk": danger
         })
 
     st.dataframe(pd.DataFrame(danger_rows), use_container_width=True)
 
-    st.divider()
+    # ================= MOMENTUM & TRADE BIAS =================
 
-    # 4️⃣ Momentum & Trade Bias
+    st.divider()
     st.subheader("📈 Momentum & Trade Bias")
 
-    strat_rows = []
     for t in etf_list:
-        score = impact_14d[t] + impact_28d[t]
-        if score > 50:
-            action = "BUY MORE"
-        elif score < 0:
-            action = "CAUTION"
+        price_28d = impact_28d.get(t, 0)
+
+        if price_28d > 0:
+            bias = "🟢 Bullish Bias — Favor holding or adding"
         else:
-            action = "HOLD"
+            bias = "🔴 Bearish Bias — Favor caution or trimming"
 
-        strat_rows.append({
-            "Ticker": t,
-            "Weekly Income ($)": df[df.Ticker == t]["Weekly"].iloc[0],
-            "14d Impact ($)": impact_14d[t],
-            "28d Impact ($)": impact_28d[t],
-            "Momentum Score": score,
-            "Suggested Action": action
-        })
-
-    strat_df = pd.DataFrame(strat_rows)
-
-    styled_strat = (
-        strat_df.style
-        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
-                  subset=["Weekly Income ($)", "14d Impact ($)", "28d Impact ($)", "Momentum Score"])
-        .format("{:+,.2f}", subset=["Weekly Income ($)", "14d Impact ($)", "28d Impact ($)", "Momentum Score"])
-    )
-    st.dataframe(styled_strat, use_container_width=True)
-
-    st.divider()
-
-    # 5️⃣ Risk Level
-    st.subheader("⚠️ Risk Level by ETF")
-
-    risk_rows = []
-    for t in etf_list:
-        spread = abs(impact_28d[t] - impact_14d[t])
-        if spread > 150:
-            risk = "HIGH"
-        elif spread > 50:
-            risk = "MEDIUM"
-        else:
-            risk = "LOW"
-
-        risk_rows.append({"Ticker": t, "Volatility Spread ($)": spread, "Risk Level": risk})
-
-    st.dataframe(pd.DataFrame(risk_rows), use_container_width=True)
-
-    st.divider()
-
-    # 6️⃣ Allocation
-    best_etf = max(etf_list, key=lambda x: impact_14d[x] + impact_28d[x])
-
-    st.subheader("💰 Capital Allocation Suggestion")
-    st.info(f"Allocate new capital to **{best_etf}** (strongest momentum). Avoid splitting.")
-
-    # 7️⃣ Summary
-    st.subheader("✅ Strategy Summary")
-    st.markdown(f"• Market condition: **{market_state}**")
-    st.markdown(f"• Strongest ETF: **{best_etf}**")
-    st.markdown("• Focus new money on strongest momentum")
-    st.markdown("• Monitor danger alerts closely")
-    st.markdown("• Weekly ETFs = volatility is normal")
+        st.markdown(f"**{t}** — {bias}")
 
 # ================= NEWS =================
 with tabs[2]:
