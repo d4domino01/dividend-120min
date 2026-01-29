@@ -200,6 +200,17 @@ with tabs[1]:
         monthly_income = df[df.Ticker == t]["Monthly"].iloc[0]
         news_score, news_label = get_sentiment(t)
 
+        # -------- Distribution Stability Score --------
+        if monthly_income > abs(price_28d) * 1.5:
+            dist_score = "🟢 Stable"
+            dist_val = 2
+        elif monthly_income >= abs(price_28d):
+            dist_score = "🟡 Moderate"
+            dist_val = 1
+        else:
+            dist_score = "🔴 Unstable"
+            dist_val = -1
+
         if news_score < 0:
             signal = "🔴 AVOID"
         elif price_28d < 0 and monthly_income < abs(price_28d):
@@ -211,6 +222,7 @@ with tabs[1]:
         if price_28d > 0: score += 1
         if monthly_income > 0: score += 1
         score += news_score
+        score += dist_val
 
         add_scores[t] = score
 
@@ -218,6 +230,7 @@ with tabs[1]:
             "Ticker": t,
             "28d Price ($)": round(price_28d, 2),
             "Monthly Income ($)": round(monthly_income, 2),
+            "Distribution Stability": dist_score,
             "News": news_label,
             "Signal": signal
         })
@@ -228,7 +241,7 @@ with tabs[1]:
     st.subheader("📊 Portfolio-Level Guidance")
 
     negatives = sum(1 for v in add_scores.values() if v < 0)
-    positives = sum(1 for v in add_scores.values() if v > 1)
+    positives = sum(1 for v in add_scores.values() if v > 2)
 
     if negatives >= 2:
         st.error("🔴 DEFENSIVE — Pause new buying, protect capital")
@@ -241,10 +254,10 @@ with tabs[1]:
     st.subheader("🎯 Best ETF to Add")
 
     best_etf = max(add_scores, key=lambda k: add_scores[k])
-    if add_scores[best_etf] > 0:
-        st.info(f"➡️ **{best_etf}** shows strongest combined signal.")
+    if add_scores[best_etf] > 1:
+        st.info(f"➡️ **{best_etf}** shows strongest income stability + price + news combination.")
     else:
-        st.warning("⚠️ No ETF currently shows strong buy conditions.")
+        st.warning("⚠️ No ETF currently shows strong stable-income conditions.")
 
     st.divider()
     st.subheader("🚨 ETF Danger Alerts")
@@ -383,4 +396,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.1 • Strategy crash fixed • summaries removed from Strategy • all tabs stable")
+st.caption("v3.14.2 • Distribution Stability Score added • no other changes")
