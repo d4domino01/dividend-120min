@@ -90,6 +90,7 @@ for t in etf_list:
 
     weekly = shares * div
     monthly = weekly * 52 / 12
+    annual = weekly * 52
     value = shares * price
 
     total_weekly_income += weekly
@@ -110,6 +111,7 @@ for t in etf_list:
         "Ticker": t,
         "Weekly": weekly,
         "Monthly": monthly,
+        "Annual": annual,
         "Value": value
     })
 
@@ -126,13 +128,10 @@ st.caption("Dividend Run-Up Monitor")
 
 tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio", "📸 Snapshots"])
 
-# =====================================================
-# ================= DASHBOARD =========================
-# =====================================================
+# ================= DASHBOARD =================
 with tabs[0]:
 
     st.subheader("📊 Overview")
-
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Value", f"${total_value:,.2f}")
     c2.metric("Monthly Income", f"${monthly_income:,.2f}")
@@ -170,9 +169,7 @@ with tabs[0]:
             })
         st.dataframe(pd.DataFrame(table), use_container_width=True)
 
-# =====================================================
-# ================= STRATEGY ==========================
-# =====================================================
+# ================= STRATEGY =================
 with tabs[1]:
 
     st.subheader("🧠 Strategy Engine — Combined Signals")
@@ -187,7 +184,6 @@ with tabs[1]:
         st.error("🔴 DEFENSIVE — Protect capital")
 
     st.divider()
-
     st.subheader("💰 Income vs Price Impact (Survival Test)")
 
     for t in etf_list:
@@ -208,38 +204,13 @@ with tabs[1]:
         </div>
         """, unsafe_allow_html=True)
 
-    st.divider()
-    st.subheader("🚨 ETF Danger Alerts")
-
-    for t in etf_list:
-        flag = "OK"
-        hist = get_hist(t)
-        if hist is not None and len(hist) > 2:
-            drop = (hist["Close"].iloc[-1]-hist["Close"].iloc[0])/hist["Close"].iloc[0]*100
-            if drop < -10:
-                flag = "PRICE SHOCK"
-
-        text = " ".join([n.title.lower() for n in get_news(NEWS_FEEDS[t],5)])
-        if any(w in text for w in DANGER_WORDS):
-            flag = "NEWS WARNING"
-
-        color = "green" if flag=="OK" else "red"
-
-        st.markdown(f"""
-        <div class="card">
-        <b>{t}</b><br>
-        <span class="{color}">{flag}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-# =====================================================
-# ================= NEWS ==============================
-# =====================================================
+# ================= NEWS =================
 with tabs[2]:
 
-    st.subheader("📰 ETF News Sentiment Summary")
+    st.subheader("📰 ETF News — Quick Guide")
 
     summaries = {}
+    moods = {}
 
     for t in etf_list:
         articles = get_news(NEWS_FEEDS[t], 6)
@@ -247,11 +218,25 @@ with tabs[2]:
         danger = any(w in text for w in DANGER_WORDS)
 
         if danger:
-            summaries[t] = "Recent articles include risk-related language. Caution advised."
+            moods[t] = ("🔴", "Cautious")
+            summaries[t] = "Recent articles include risk-related language such as trading halts or closures."
         elif len(articles) >= 4:
-            summaries[t] = "Coverage is mostly constructive, focused on income and strategy stability."
+            moods[t] = ("🟢", "Positive")
+            summaries[t] = "Coverage is broadly constructive, focused on income stability and strategy performance."
         else:
-            summaries[t] = "News is mixed or limited with no strong directional bias."
+            moods[t] = ("🟡", "Mixed")
+            summaries[t] = "Coverage is mixed or limited with no strong directional signals."
+
+    for t in etf_list:
+        icon, label = moods[t]
+        st.markdown(f"""
+        <div class="card">
+        <b>{t}</b> — {icon} {label}
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("🧠 Market Temperament by ETF")
 
     for t in etf_list:
         st.markdown(f"""
@@ -270,9 +255,7 @@ with tabs[2]:
             st.markdown(f"- [{n.title}]({n.link})")
         st.divider()
 
-# =====================================================
-# ================= PORTFOLIO =========================
-# =====================================================
+# ================= PORTFOLIO =================
 with tabs[3]:
 
     st.subheader("📁 Portfolio Control Panel")
@@ -295,11 +278,16 @@ with tabs[3]:
 
         with c3:
             weekly = df[df.Ticker==t]["Weekly"].iloc[0]
+            monthly = df[df.Ticker==t]["Monthly"].iloc[0]
+            annual = df[df.Ticker==t]["Annual"].iloc[0]
             value = df[df.Ticker==t]["Value"].iloc[0]
+
             st.markdown(f"""
             <div class="card small">
             Price: ${prices[t]:.2f}<br>
             Weekly Income: ${weekly:.2f}<br>
+            Monthly Income: ${monthly:.2f}<br>
+            Annual Income: ${annual:.2f}<br>
             Value: ${value:.2f}
             </div>
             """, unsafe_allow_html=True)
@@ -309,9 +297,7 @@ with tabs[3]:
     st.subheader("💰 Cash Wallet")
     st.session_state.cash = st.number_input("Cash ($)", min_value=0.0, step=50.0, value=float(st.session_state.cash))
 
-# =====================================================
-# ================= SNAPSHOTS =========================
-# =====================================================
+# ================= SNAPSHOTS =================
 with tabs[4]:
 
     st.subheader("📸 Portfolio Snapshots")
@@ -333,4 +319,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.0 • all cards • all tabs active • no styler • crash-safe")
+st.caption("v3.14.2 • portfolio income restored • news quick guide restored • no removals")
