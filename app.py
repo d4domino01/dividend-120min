@@ -371,24 +371,63 @@ with tabs[3]:
         st.markdown(f"### {t}")
         c1, c2, c3 = st.columns(3)
 
+        # -------- INPUTS --------
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
-                "Shares", min_value=0, step=1, value=st.session_state.holdings[t]["shares"], key=f"s_{t}"
+                "Shares",
+                min_value=0,
+                step=1,
+                value=int(st.session_state.holdings[t]["shares"]),
+                key=f"s_{t}",
             )
+
         with c2:
             st.session_state.holdings[t]["div"] = st.number_input(
-                "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
-                value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
+                "Weekly Dividend / Share ($)",
+                min_value=0.0,
+                step=0.01,
+                value=float(st.session_state.holdings[t]["div"]),
+                key=f"d_{t}",
             )
+
+        # -------- CALCS --------
+        shares = st.session_state.holdings[t]["shares"]
+        div = st.session_state.holdings[t]["div"]
+        price = prices.get(t, 0)
+
+        weekly_income = shares * div
+        monthly_income = weekly_income * 52 / 12
+        annual_income = weekly_income * 52
+        position_value = shares * price
+
+        # -------- DISPLAY --------
         with c3:
             st.markdown(
-                f"Price: ${prices[t]:.2f}<br>Dividend / Share: ${st.session_state.holdings[t]['div']:.2f}",
-                unsafe_allow_html=True
+                f"""
+                <div class="card">
+                <b>Price:</b> ${price:.2f}<br>
+                <b>Dividend per stock (weekly):</b> ${div:.2f}<br>
+                <b>Total weekly income:</b> ${weekly_income:.2f}<br>
+                <b>Total monthly income:</b> ${monthly_income:.2f}<br>
+                <b>Total annual income:</b> ${annual_income:.2f}<br>
+                <b>Position value:</b> ${position_value:,.2f}
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
+
         st.divider()
 
+    # -------- CASH WALLET --------
     st.subheader("💰 Cash Wallet")
-    st.session_state.cash = st.number_input("Cash ($)", min_value=0.0, step=50.0, value=float(st.session_state.cash))
+
+    st.session_state.cash = st.number_input(
+        "Cash ($)",
+        min_value=0.0,
+        step=50.0,
+        value=float(st.session_state.cash),
+        key="cash_wallet",
+    )
 
 # ================= SNAPSHOTS =================
 with tabs[4]:
