@@ -181,7 +181,6 @@ with tabs[1]:
 
     st.subheader("🧠 Strategy Engine — Combined Signals")
 
-    # ---- sentiment analysis (local, not dependent on News tab) ----
     def get_sentiment(ticker):
         articles = get_news(NEWS_FEEDS[ticker], 6)
         text = " ".join([a.title.lower() for a in articles])
@@ -199,10 +198,8 @@ with tabs[1]:
     for t in etf_list:
         price_28d = impact_28d.get(t, 0)
         monthly_income = df[df.Ticker == t]["Monthly"].iloc[0]
-
         news_score, news_label = get_sentiment(t)
 
-        # ---- ETF SIGNAL LOGIC ----
         if news_score < 0:
             signal = "🔴 AVOID"
         elif price_28d < 0 and monthly_income < abs(price_28d):
@@ -210,34 +207,28 @@ with tabs[1]:
         else:
             signal = "🟢 ADD"
 
-        # ---- score for ranking ----
         score = 0
-        if price_28d > 0:
-            score += 1
-        if monthly_income > 0:
-            score += 1
+        if price_28d > 0: score += 1
+        if monthly_income > 0: score += 1
         score += news_score
 
         add_scores[t] = score
 
         strategy_rows.append({
             "Ticker": t,
-            "28d Price Impact ($)": round(price_28d, 2),
+            "28d Price ($)": round(price_28d, 2),
             "Monthly Income ($)": round(monthly_income, 2),
             "News": news_label,
             "Signal": signal
         })
 
-    strat_df = pd.DataFrame(strategy_rows)
-    st.dataframe(strat_df, use_container_width=True)
-
-    # ================= PORTFOLIO GUIDANCE =================
-
-    negatives = sum(1 for v in add_scores.values() if v < 0)
-    positives = sum(1 for v in add_scores.values() if v > 1)
+    st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True)
 
     st.divider()
     st.subheader("📊 Portfolio-Level Guidance")
+
+    negatives = sum(1 for v in add_scores.values() if v < 0)
+    positives = sum(1 for v in add_scores.values() if v > 1)
 
     if negatives >= 2:
         st.error("🔴 DEFENSIVE — Pause new buying, protect capital")
@@ -246,121 +237,37 @@ with tabs[1]:
     else:
         st.warning("🟡 SELECTIVE — Buy only on pullbacks")
 
-    # ================= BEST ETF TO ADD =================
+    st.divider()
+    st.subheader("🎯 Best ETF to Add")
 
     best_etf = max(add_scores, key=lambda k: add_scores[k])
-
-    st.divider()
-    st.subheader("🎯 Best ETF to Add (if investing now)")
-
     if add_scores[best_etf] > 0:
-        st.info(f"➡️ **{best_etf}** shows the strongest combined signal right now.")
+        st.info(f"➡️ **{best_etf}** shows strongest combined signal.")
     else:
-        st.warning("⚠️ No ETF currently shows a strong buy setup.")
-
-    # ================= ETF DANGER ALERTS =================
+        st.warning("⚠️ No ETF currently shows strong buy conditions.")
 
     st.divider()
     st.subheader("🚨 ETF Danger Alerts")
 
     danger_rows = []
-
     for t in etf_list:
         news_score, _ = get_sentiment(t)
-
         if news_score < 0:
             danger = "🔴 HIGH"
-        elif impact_28d.get(t, 0) < 0:
+        elif impact_28d[t] < 0:
             danger = "🟡 WATCH"
         else:
             danger = "🟢 OK"
 
-        danger_rows.append({
-            "Ticker": t,
-            "28d Price ($)": round(impact_28d.get(t, 0), 2),
-            "Risk": danger
-        })
+        danger_rows.append({"Ticker": t, "28d Price ($)": impact_28d[t], "Risk": danger})
 
     st.dataframe(pd.DataFrame(danger_rows), use_container_width=True)
-
-    # ================= MOMENTUM & TRADE BIAS =================
 
     st.divider()
     st.subheader("📈 Momentum & Trade Bias")
 
     for t in etf_list:
-        if impact_28d.get(t, 0) > 0:
-            bias = "🟢 Bullish — Favor holding or adding"
-        else:
-            bias = "🔴 Bearish — Favor caution"
-
-        st.markdown(f"**{t}** — {bias}")
-
-    # ================= PORTFOLIO GUIDANCE =================
-
-    negatives = sum(1 for v in add_scores.values() if v < 0)
-    positives = sum(1 for v in add_scores.values() if v > 1)
-
-    st.divider()
-    st.subheader("📊 Portfolio-Level Guidance")
-
-    if negatives >= 2:
-        st.error("🔴 DEFENSIVE — Pause new buying, protect capital")
-    elif positives >= 2:
-        st.success("🟢 CONSTRUCTIVE — Add to strongest ETF")
-    else:
-        st.warning("🟡 SELECTIVE — Buy only on pullbacks")
-
-    # ================= BEST ETF TO ADD =================
-
-    best_etf = max(add_scores, key=lambda k: add_scores[k])
-
-    st.divider()
-    st.subheader("🎯 Best ETF to Add (if investing now)")
-
-    if add_scores[best_etf] > 0:
-        st.info(f"➡️ **{best_etf}** shows the best combination of price strength, income, and news sentiment.")
-    else:
-        st.warning("⚠️ No ETF currently shows a strong buy setup. Capital preservation favored.")
-
-    # ================= RISK WARNINGS =================
-
-    st.divider()
-    st.subheader("🚨 ETF Danger Alerts")
-
-    danger_rows = []
-
-    for t in etf_list:
-        summary = summaries.get(t, "").lower()
-
-        if "halt" in summary or "suspend" in summary or "closure" in summary or "terminate" in summary:
-            danger = "🔴 HIGH"
-        elif impact_28d.get(t, 0) < 0:
-            danger = "🟡 WATCH"
-        else:
-            danger = "🟢 OK"
-
-        danger_rows.append({
-            "Ticker": t,
-            "28d Price": round(impact_28d.get(t, 0), 2),
-            "Risk": danger
-        })
-
-    st.dataframe(pd.DataFrame(danger_rows), use_container_width=True)
-
-    # ================= MOMENTUM & TRADE BIAS =================
-
-    st.divider()
-    st.subheader("📈 Momentum & Trade Bias")
-
-    for t in etf_list:
-        price_28d = impact_28d.get(t, 0)
-
-        if price_28d > 0:
-            bias = "🟢 Bullish Bias — Favor holding or adding"
-        else:
-            bias = "🔴 Bearish Bias — Favor caution or trimming"
-
+        bias = "🟢 Bullish — Favor holding or adding" if impact_28d[t] > 0 else "🔴 Bearish — Favor caution"
         st.markdown(f"**{t}** — {bias}")
 
 # ================= NEWS =================
@@ -394,12 +301,10 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(mood_rows), use_container_width=True)
 
     st.divider()
-
     for t in etf_list:
         st.info(f"**{t}** — {summaries[t]}")
 
     st.divider()
-
     for t in etf_list:
         st.markdown(f"### 🔹 {t}")
         for n in get_news(NEWS_FEEDS[t], 5):
@@ -415,26 +320,18 @@ with tabs[3]:
         st.markdown(f"### {t}")
         c1, c2, c3 = st.columns(3)
 
-        # -------- INPUTS --------
         with c1:
             st.session_state.holdings[t]["shares"] = st.number_input(
-                "Shares",
-                min_value=0,
-                step=1,
-                value=int(st.session_state.holdings[t]["shares"]),
-                key=f"s_{t}",
+                "Shares", min_value=0, step=1,
+                value=int(st.session_state.holdings[t]["shares"]), key=f"s_{t}"
             )
 
         with c2:
             st.session_state.holdings[t]["div"] = st.number_input(
-                "Weekly Dividend / Share ($)",
-                min_value=0.0,
-                step=0.01,
-                value=float(st.session_state.holdings[t]["div"]),
-                key=f"d_{t}",
+                "Weekly Dividend / Share ($)", min_value=0.0, step=0.01,
+                value=float(st.session_state.holdings[t]["div"]), key=f"d_{t}"
             )
 
-        # -------- CALCS --------
         shares = st.session_state.holdings[t]["shares"]
         div = st.session_state.holdings[t]["div"]
         price = prices.get(t, 0)
@@ -444,33 +341,24 @@ with tabs[3]:
         annual_income = weekly_income * 52
         position_value = shares * price
 
-        # -------- DISPLAY --------
         with c3:
-            st.markdown(
-                f"""
-                <div class="card">
-                <b>Price:</b> ${price:.2f}<br>
-                <b>Dividend per stock (weekly):</b> ${div:.2f}<br>
-                <b>Total weekly income:</b> ${weekly_income:.2f}<br>
-                <b>Total monthly income:</b> ${monthly_income:.2f}<br>
-                <b>Total annual income:</b> ${annual_income:.2f}<br>
-                <b>Position value:</b> ${position_value:,.2f}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.markdown(f"""
+            <div class="card">
+            <b>Price:</b> ${price:.2f}<br>
+            <b>Dividend per share:</b> ${div:.2f}<br>
+            <b>Total weekly income:</b> ${weekly_income:.2f}<br>
+            <b>Total monthly income:</b> ${monthly_income:.2f}<br>
+            <b>Total annual income:</b> ${annual_income:.2f}<br>
+            <b>Position value:</b> ${position_value:,.2f}
+            </div>
+            """, unsafe_allow_html=True)
 
         st.divider()
 
-    # -------- CASH WALLET --------
     st.subheader("💰 Cash Wallet")
-
     st.session_state.cash = st.number_input(
-        "Cash ($)",
-        min_value=0.0,
-        step=50.0,
-        value=float(st.session_state.cash),
-        key="cash_wallet",
+        "Cash ($)", min_value=0.0, step=50.0,
+        value=float(st.session_state.cash), key="cash_wallet"
     )
 
 # ================= SNAPSHOTS =================
@@ -495,4 +383,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.0 • Strategy fully restored • all tabs active • color rules enforced")
+st.caption("v3.14.1 • Strategy crash fixed • summaries removed from Strategy • all tabs stable")
