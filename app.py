@@ -183,15 +183,18 @@ with tabs[1]:
 
     if positives >= 2:
         st.success("🟢 CONSTRUCTIVE — Add to strongest ETF")
+        strategy_state = "CONSTRUCTIVE"
     elif positives == 1:
         st.warning("🟡 SELECTIVE — Buy dips only")
+        strategy_state = "SELECTIVE"
     else:
         st.error("🔴 DEFENSIVE — Protect capital")
+        strategy_state = "DEFENSIVE"
 
     st.divider()
 
-    # ---- Income vs Price Damage ----
-    st.subheader("💰 Income vs Price Damage")
+    # ---- A: Income vs Price Damage ----
+    st.subheader("💰 Income vs Price Damage (Survival Test)")
 
     for t in etf_list:
         monthly = df[df.Ticker == t]["Monthly"].iloc[0]
@@ -213,7 +216,43 @@ with tabs[1]:
 
     st.divider()
 
-    # ---- Momentum Table ----
+    # ---- B: ETF Danger Alerts ----
+    st.subheader("🚨 ETF Danger Alerts")
+
+    danger_rows = []
+
+    for t in etf_list:
+        hist = get_recent(t)
+        price_flag = "OK"
+
+        if hist is not None and len(hist) >= 2:
+            d1 = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
+            d5 = (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100
+            if d1 <= -7 or d5 <= -12:
+                price_flag = "PRICE SHOCK"
+
+        news_flag = "OK"
+        for n in get_news(NEWS_FEEDS[t], 6):
+            if any(w in n.title.lower() for w in DANGER_WORDS):
+                news_flag = "NEWS WARNING"
+                break
+
+        overall = "HIGH RISK" if price_flag != "OK" or news_flag != "OK" else "OK"
+
+        danger_rows.append({
+            "Ticker": t,
+            "Price Alert": price_flag,
+            "News Alert": news_flag,
+            "Overall": overall
+        })
+
+    st.dataframe(pd.DataFrame(danger_rows), use_container_width=True)
+
+    st.divider()
+
+    # ---- C: Momentum Table ----
+    st.subheader("📈 Momentum & Trade Bias")
+
     strat_rows = []
     for t in etf_list:
         score = impact_14d[t] + impact_28d[t]
@@ -237,21 +276,34 @@ with tabs[1]:
         .format("{:+,.2f}", subset=["Weekly ($)", "14d ($)", "28d ($)", "Momentum"])
     )
 
-    st.subheader("📈 Momentum & Trade Bias")
     st.dataframe(styled_strat, use_container_width=True)
 
-    # ---- Risk Table ----
+    st.divider()
+
+    # ---- D: Volatility Risk ----
+    st.subheader("⚠️ Volatility Risk")
+
     risk_rows = []
     for t in etf_list:
         spread = abs(impact_28d[t] - impact_14d[t])
         risk = "HIGH" if spread > 150 else "MEDIUM" if spread > 50 else "LOW"
         risk_rows.append({"Ticker": t, "Spread ($)": round(spread, 2), "Risk": risk})
 
-    st.subheader("⚠️ Risk Level by ETF")
     st.dataframe(pd.DataFrame(risk_rows), use_container_width=True)
 
+    # ---- E: Allocation ----
     best = max(strat_rows, key=lambda x: x["Momentum"])["Ticker"]
-    st.info(f"💰 Allocate new capital to **{best}** (strongest momentum).")
+
+    st.subheader("💰 Capital Allocation Suggestion")
+    st.info(f"Allocate new capital to **{best}** (strongest momentum).")
+
+    # ---- F: Summary ----
+    st.subheader("✅ Strategy Summary")
+    st.markdown(f"- Market stance: **{strategy_state}**")
+    st.markdown(f"- Strongest ETF: **{best}**")
+    st.markdown("- Focus buys on strongest ETF")
+    st.markdown("- Avoid adding during price shocks")
+    st.markdown("- Weekly ETFs = high volatility")
 
 # ================= NEWS =================
 with tabs[2]:
@@ -331,4 +383,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.0 • dashboard cards+toggle restored • strategy fully restored • news summaries added • no tabs removed")
+st.caption("v3.14.2 • ALL strategy sections restored • dashboard cards+toggle OK • no tabs removed")
