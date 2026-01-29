@@ -138,7 +138,6 @@ with tabs[0]:
     c3.metric("Annual Income", f"${annual_income:,.2f}")
 
     st.divider()
-
     show_table_only = st.toggle("📋 Table only view")
 
     if not show_table_only:
@@ -158,16 +157,12 @@ with tabs[0]:
             </div>
             """, unsafe_allow_html=True)
 
-    dash_rows = []
-    for t in etf_list:
-        dash_rows.append({
-            "Ticker": t,
-            "Weekly ($)": df[df.Ticker == t]["Weekly"].iloc[0],
-            "14d ($)": impact_14d[t],
-            "28d ($)": impact_28d[t],
-        })
-
-    dash_df = pd.DataFrame(dash_rows)
+    dash_df = pd.DataFrame([{
+        "Ticker": t,
+        "Weekly ($)": df[df.Ticker == t]["Weekly"].iloc[0],
+        "14d ($)": impact_14d[t],
+        "28d ($)": impact_28d[t],
+    } for t in etf_list])
 
     styled = (
         dash_df.style
@@ -197,7 +192,8 @@ with tabs[1]:
     add_scores = {}
 
     for t in etf_list:
-        price_28d = impact_28d.get(t, 0)
+        price_14d = impact_14d[t]
+        price_28d = impact_28d[t]
         monthly_inc = df[df.Ticker == t]["Monthly"].iloc[0]
         news_score, news_label = get_sentiment(t)
 
@@ -215,13 +211,14 @@ with tabs[1]:
         else:
             signal = "🟢 ADD"
 
-        score = (1 if price_28d > 0 else 0) + (1 if monthly_inc > 0 else 0) + news_score + dist_val
+        score = (1 if price_14d > 0 else 0) + (1 if price_28d > 0 else 0) + news_score + dist_val
         add_scores[t] = score
 
         strategy_rows.append({
             "Ticker": t,
-            "28d Price ($)": round(price_28d, 2),
-            "Monthly Income ($)": round(monthly_inc, 2),
+            "14d Price ($)": price_14d,
+            "28d Price ($)": price_28d,
+            "Monthly Income ($)": monthly_inc,
             "Distribution Stability": dist_score,
             "News": news_label,
             "Signal": signal
@@ -232,8 +229,12 @@ with tabs[1]:
     styled_strat = (
         strat_df.style
         .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
-                  subset=["28d Price ($)", "Monthly Income ($)"])
-        .format({"28d Price ($)": "{:+,.2f}", "Monthly Income ($)": "${:,.2f}"})
+                  subset=["14d Price ($)", "28d Price ($)", "Monthly Income ($)"])
+        .format({
+            "14d Price ($)": "{:+,.2f}",
+            "28d Price ($)": "{:+,.2f}",
+            "Monthly Income ($)": "${:,.2f}"
+        })
     )
 
     st.dataframe(styled_strat, use_container_width=True)
@@ -261,73 +262,20 @@ with tabs[1]:
         st.warning("⚠️ No ETF currently shows strong stable-income conditions.")
 
     st.divider()
-    st.subheader("🚨 ETF Danger Alerts")
-
-    danger_rows = []
-    for t in etf_list:
-        news_score, _ = get_sentiment(t)
-        if news_score < 0:
-            danger = "🔴 HIGH"
-        elif impact_28d[t] < 0:
-            danger = "🟡 WATCH"
-        else:
-            danger = "🟢 OK"
-
-        danger_rows.append({"Ticker": t, "28d Price ($)": impact_28d[t], "Risk": danger})
-
-    danger_df = pd.DataFrame(danger_rows)
-
-    styled_danger = (
-        danger_df.style
-        .applymap(lambda v: "color:#22c55e" if v >= 0 else "color:#ef4444",
-                  subset=["28d Price ($)"])
-        .format({"28d Price ($)": "{:+,.2f}"})
-    )
-
-    st.dataframe(styled_danger, use_container_width=True)
-
-    st.divider()
     st.subheader("📈 Momentum & Trade Bias")
 
     for t in etf_list:
-        bias = "🟢 Bullish — Favor holding or adding" if impact_28d[t] > 0 else "🔴 Bearish — Favor caution"
+        if impact_14d[t] > 0 and impact_28d[t] > 0:
+            bias = "🟢 Strong bullish momentum"
+        elif impact_28d[t] > 0:
+            bias = "🟡 Medium-term bullish, short-term cooling"
+        else:
+            bias = "🔴 Weak momentum — caution"
         st.markdown(f"**{t}** — {bias}")
 
 # ================= NEWS =================
 with tabs[2]:
-
     st.subheader("📰 ETF News Sentiment Summary")
-
-    summaries = {}
-    for t in etf_list:
-        articles = get_news(NEWS_FEEDS[t], 6)
-        text = " ".join([a.title.lower() for a in articles])
-        danger = any(w in text for w in DANGER_WORDS)
-
-        if danger:
-            summaries[t] = "Recent coverage includes risk-related language. Caution warranted."
-        elif len(articles) >= 4:
-            summaries[t] = "News tone is broadly constructive, focused on income strategy."
-        else:
-            summaries[t] = "Coverage is mixed or limited with no strong signals."
-
-    mood_rows = []
-    for t in etf_list:
-        if "risk" in summaries[t]:
-            mood = "🔴 Cautious"
-        elif "constructive" in summaries[t]:
-            mood = "🟢 Positive"
-        else:
-            mood = "🟡 Mixed"
-        mood_rows.append({"Ticker": t, "Sentiment": mood})
-
-    st.dataframe(pd.DataFrame(mood_rows), use_container_width=True)
-
-    st.divider()
-    for t in etf_list:
-        st.info(f"**{t}** — {summaries[t]}")
-
-    st.divider()
     for t in etf_list:
         st.markdown(f"### 🔹 {t}")
         for n in get_news(NEWS_FEEDS[t], 5):
@@ -338,6 +286,8 @@ with tabs[2]:
 with tabs[3]:
 
     st.subheader("📁 Portfolio Control Panel")
+
+    def col(v): return "green" if v >= 0 else "red"
 
     for t in etf_list:
         st.markdown(f"### {t}")
@@ -364,16 +314,14 @@ with tabs[3]:
         annual_income = weekly_income * 52
         position_value = shares * price
 
-        def col(v): return "green" if v >= 0 else "red"
-
         with c3:
             st.markdown(f"""
             <div class="card">
             <b>Price:</b> ${price:.2f}<br>
-            <b>Dividend per share:</b> <span class="green">${div:.2f}</span><br>
-            <b>Total weekly income:</b> <span class="{col(weekly_income)}">${weekly_income:.2f}</span><br>
-            <b>Total monthly income:</b> <span class="{col(monthly_income)}">${monthly_income:.2f}</span><br>
-            <b>Total annual income:</b> <span class="{col(annual_income)}">${annual_income:.2f}</span><br>
+            <b>Dividend / share:</b> <span class="green">${div:.2f}</span><br>
+            <b>Weekly income:</b> <span class="{col(weekly_income)}">${weekly_income:.2f}</span><br>
+            <b>Monthly income:</b> <span class="{col(monthly_income)}">${monthly_income:.2f}</span><br>
+            <b>Annual income:</b> <span class="{col(annual_income)}">${annual_income:.2f}</span><br>
             <b>Position value:</b> <span class="{col(position_value)}">${position_value:,.2f}</span>
             </div>
             """, unsafe_allow_html=True)
@@ -408,4 +356,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.3 • Global green/red applied to all $ values across all tabs")
+st.caption("v3.14.4 • Strategy includes 14d + 28d momentum, distribution stability, global green/red")
