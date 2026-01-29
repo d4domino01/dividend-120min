@@ -275,7 +275,32 @@ with tabs[1]:
 
 # ================= NEWS =================
 with tabs[2]:
-    st.subheader("📰 ETF News Sentiment Summary")
+
+    st.subheader("🧭 ETF News Risk Indicators")
+
+    news_rows = []
+
+    for t in etf_list:
+        articles = get_news(NEWS_FEEDS[t], 6)
+        text = " ".join([a.title.lower() for a in articles])
+
+        if any(w in text for w in DANGER_WORDS):
+            mood = "🔴 Risk"
+        elif len(articles) >= 4:
+            mood = "🟢 Positive"
+        else:
+            mood = "🟡 Mixed"
+
+        news_rows.append({
+            "Ticker": t,
+            "News Status": mood
+        })
+
+    st.dataframe(pd.DataFrame(news_rows), use_container_width=True)
+
+    st.divider()
+    st.subheader("🗞 Latest ETF Headlines")
+
     for t in etf_list:
         st.markdown(f"### 🔹 {t}")
         for n in get_news(NEWS_FEEDS[t], 5):
@@ -356,4 +381,4 @@ with tabs[4]:
         totals = hist.groupby("Snapshot")["Total"].max()
         st.line_chart(totals)
 
-st.caption("v3.14.4 • Strategy includes 14d + 28d momentum, distribution stability, global green/red")
+st.caption("v3.14.5 • News tab now includes ETF risk indicators + headlines • no features removed")
