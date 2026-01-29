@@ -181,25 +181,26 @@ with tabs[1]:
 
     st.subheader("🧠 Strategy Engine — Combined Signals")
 
+    # ---- sentiment analysis (local, not dependent on News tab) ----
+    def get_sentiment(ticker):
+        articles = get_news(NEWS_FEEDS[ticker], 6)
+        text = " ".join([a.title.lower() for a in articles])
+
+        if any(w in text for w in DANGER_WORDS):
+            return -1, "🔴 Negative"
+        elif len(articles) >= 4:
+            return 1, "🟢 Positive"
+        else:
+            return 0, "🟡 Mixed"
+
     strategy_rows = []
     add_scores = {}
 
     for t in etf_list:
         price_28d = impact_28d.get(t, 0)
-
         monthly_income = df[df.Ticker == t]["Monthly"].iloc[0]
 
-        summary = summaries.get(t, "").lower()
-
-        if "risk" in summary or "halt" in summary or "closure" in summary or "terminate" in summary:
-            news_score = -1
-            news_label = "🔴 Negative"
-        elif "constructive" in summary or "positive" in summary:
-            news_score = 1
-            news_label = "🟢 Positive"
-        else:
-            news_score = 0
-            news_label = "🟡 Mixed"
+        news_score, news_label = get_sentiment(t)
 
         # ---- ETF SIGNAL LOGIC ----
         if news_score < 0:
@@ -209,7 +210,7 @@ with tabs[1]:
         else:
             signal = "🟢 ADD"
 
-        # ---- SCORE FOR BEST ETF ----
+        # ---- score for ranking ----
         score = 0
         if price_28d > 0:
             score += 1
@@ -228,8 +229,72 @@ with tabs[1]:
         })
 
     strat_df = pd.DataFrame(strategy_rows)
-
     st.dataframe(strat_df, use_container_width=True)
+
+    # ================= PORTFOLIO GUIDANCE =================
+
+    negatives = sum(1 for v in add_scores.values() if v < 0)
+    positives = sum(1 for v in add_scores.values() if v > 1)
+
+    st.divider()
+    st.subheader("📊 Portfolio-Level Guidance")
+
+    if negatives >= 2:
+        st.error("🔴 DEFENSIVE — Pause new buying, protect capital")
+    elif positives >= 2:
+        st.success("🟢 CONSTRUCTIVE — Add to strongest ETF")
+    else:
+        st.warning("🟡 SELECTIVE — Buy only on pullbacks")
+
+    # ================= BEST ETF TO ADD =================
+
+    best_etf = max(add_scores, key=lambda k: add_scores[k])
+
+    st.divider()
+    st.subheader("🎯 Best ETF to Add (if investing now)")
+
+    if add_scores[best_etf] > 0:
+        st.info(f"➡️ **{best_etf}** shows the strongest combined signal right now.")
+    else:
+        st.warning("⚠️ No ETF currently shows a strong buy setup.")
+
+    # ================= ETF DANGER ALERTS =================
+
+    st.divider()
+    st.subheader("🚨 ETF Danger Alerts")
+
+    danger_rows = []
+
+    for t in etf_list:
+        news_score, _ = get_sentiment(t)
+
+        if news_score < 0:
+            danger = "🔴 HIGH"
+        elif impact_28d.get(t, 0) < 0:
+            danger = "🟡 WATCH"
+        else:
+            danger = "🟢 OK"
+
+        danger_rows.append({
+            "Ticker": t,
+            "28d Price ($)": round(impact_28d.get(t, 0), 2),
+            "Risk": danger
+        })
+
+    st.dataframe(pd.DataFrame(danger_rows), use_container_width=True)
+
+    # ================= MOMENTUM & TRADE BIAS =================
+
+    st.divider()
+    st.subheader("📈 Momentum & Trade Bias")
+
+    for t in etf_list:
+        if impact_28d.get(t, 0) > 0:
+            bias = "🟢 Bullish — Favor holding or adding"
+        else:
+            bias = "🔴 Bearish — Favor caution"
+
+        st.markdown(f"**{t}** — {bias}")
 
     # ================= PORTFOLIO GUIDANCE =================
 
