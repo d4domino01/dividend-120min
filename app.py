@@ -55,6 +55,13 @@ prices = {t: get_price(t) for t in ETF_LIST}
 # =====================================================
 st.title("📁 Portfolio — Locked Foundation")
 
+st.markdown(f"""
+<div class="card">
+<h3>💼 Total Portfolio Value</h3>
+<h2>${total_value:,.2f}</h2>
+</div>
+""", unsafe_allow_html=True)
+
 validation_errors = []
 
 total_weekly = 0
