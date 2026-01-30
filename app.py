@@ -5,237 +5,216 @@ import yfinance as yf
 import os
 from datetime import datetime
 
-# ---------------- CONFIG ----------------
+# ================= CONFIG =================
 st.set_page_config(page_title="Income Strategy Engine", layout="wide")
 
-# ---------------- STYLE ----------------
 st.markdown("""
 <style>
 h1 {font-size: 1.4rem !important;}
 h2 {font-size: 1.2rem !important;}
 h3 {font-size: 1.05rem !important;}
-h4 {font-size: 0.95rem !important;}
-p, li, span, div {font-size: 0.9rem !important;}
-[data-testid="stMetricValue"] {font-size: 1.1rem !important;}
-[data-testid="stMetricLabel"] {font-size: 0.75rem !important;}
+p, li, div {font-size: 0.9rem !important;}
 .green {color:#22c55e;}
 .red {color:#ef4444;}
 .yellow {color:#eab308;}
-.card {background:#0f172a;padding:12px;border-radius:12px;margin-bottom:8px;}
-.banner {padding:14px;border-radius:14px;margin-bottom:14px;}
+.card {background:#0f172a;padding:12px;border-radius:12px;margin-bottom:10px;}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- ETF LIST ----------------
-etf_list = ["QDTE", "CHPY", "XDTE"]
-
-# ---------------- SNAPSHOT DIR ----------------
+# ================= DATA =================
+ETF_LIST = ["QDTE", "CHPY", "XDTE"]
 SNAP_DIR = "snapshots_v2"
 os.makedirs(SNAP_DIR, exist_ok=True)
 
-# ---------------- SESSION ----------------
 if "holdings" not in st.session_state:
     st.session_state.holdings = {
-        "QDTE": {"shares": 125, "div": 0.177},
-        "CHPY": {"shares": 63, "div": 0.52},
-        "XDTE": {"shares": 84, "div": 0.16},
+        "QDTE": {"shares":125,"div":0.177},
+        "CHPY": {"shares":63,"div":0.52},
+        "XDTE": {"shares":84,"div":0.16},
     }
 
 if "cash" not in st.session_state:
     st.session_state.cash = 0.0
 
-# ---------------- NEWS ----------------
 NEWS_FEEDS = {
-    "QDTE": [
-        "https://news.google.com/rss/search?q=QDTE+ETF",
-        "https://news.google.com/rss/search?q=NASDAQ+market"
-    ],
-    "CHPY": [
-        "https://news.google.com/rss/search?q=CHPY+ETF",
-        "https://news.google.com/rss/search?q=SOXX+semiconductor"
-    ],
-    "XDTE": [
-        "https://news.google.com/rss/search?q=XDTE+ETF",
-        "https://news.google.com/rss/search?q=S%26P+500+market"
-    ]
+    "QDTE": ["QDTE ETF","NASDAQ market"],
+    "CHPY": ["CHPY ETF","SOXX semiconductor"],
+    "XDTE": ["XDTE ETF","S&P 500 market"],
 }
 
-DANGER_WORDS = ["halt", "suspend", "liquidation", "delist", "closure", "terminate", "risk", "volatility"]
-
-def get_news(urls, limit=8):
-    items = []
-    for u in urls:
-        try:
-            items += feedparser.parse(u).entries
-        except:
-            pass
-    return items[:limit]
-
-# ---------------- DATA ----------------
-@st.cache_data(ttl=600)
-def get_price(t):
-    try:
-        return round(yf.Ticker(t).history(period="5d")["Close"].iloc[-1], 2)
-    except:
-        return 0.0
+DANGER_WORDS = ["halt","suspend","liquidation","delist","terminate","closure"]
 
 @st.cache_data(ttl=600)
-def get_hist(t):
-    try:
-        return yf.Ticker(t).history(period="30d")
-    except:
-        return None
+def price(t): 
+    try: return round(yf.Ticker(t).history(period="5d")["Close"].iloc[-1],2)
+    except: return 0
 
-prices = {t: get_price(t) for t in etf_list}
+@st.cache_data(ttl=600)
+def hist(t):
+    try: return yf.Ticker(t).history(period="30d")
+    except: return None
 
-# ---------------- CALCS ----------------
-rows = []
-impact_14d, impact_28d = {}, {}
-total_weekly_income, stock_value_total = 0, 0
+def news_score(t):
+    text = ""
+    for q in NEWS_FEEDS[t]:
+        url = f"https://news.google.com/rss/search?q={q.replace(' ','+')}"
+        text += " ".join([n.title.lower() for n in feedparser.parse(url).entries[:4]])
+    if any(w in text for w in DANGER_WORDS): return -1
+    if len(text) > 120: return 1
+    return 0
 
-for t in etf_list:
-    h = st.session_state.holdings[t]
-    shares, div = h["shares"], h["div"]
-    price = prices[t]
+prices = {t:price(t) for t in ETF_LIST}
 
-    weekly = shares * div
-    monthly = weekly * 52 / 12
-    value = shares * price
+rows, i14, i28 = [], {}, {}
+weekly_total, value_total = 0, 0
 
-    total_weekly_income += weekly
-    stock_value_total += value
+for t in ETF_LIST:
+    s = st.session_state.holdings[t]["shares"]
+    d = st.session_state.holdings[t]["div"]
+    p = prices[t]
 
-    hist = get_hist(t)
-    if hist is not None and len(hist) > 20:
-        now = hist["Close"].iloc[-1]
-        impact_14d[t] = round((now - hist["Close"].iloc[-10]) * shares, 2)
-        impact_28d[t] = round((now - hist["Close"].iloc[-20]) * shares, 2)
+    w = s*d
+    m = w*52/12
+    v = s*p
+
+    weekly_total += w
+    value_total += v
+
+    h = hist(t)
+    if h is not None and len(h)>20:
+        i14[t] = round((h["Close"].iloc[-1]-h["Close"].iloc[-10])*s,2)
+        i28[t] = round((h["Close"].iloc[-1]-h["Close"].iloc[-20])*s,2)
     else:
-        impact_14d[t] = impact_28d[t] = 0.0
+        i14[t]=i28[t]=0
 
-    rows.append({"Ticker": t, "Weekly": weekly, "Monthly": monthly, "Value": value})
+    rows.append({"Ticker":t,"Weekly":w,"Monthly":m,"Value":v})
 
 df = pd.DataFrame(rows)
-
 cash = st.session_state.cash
-total_value = stock_value_total + cash
-monthly_income = total_weekly_income * 52 / 12
-annual_income = monthly_income * 12
+total_value = value_total + cash
 
-# =====================================================
-# ======================= UI ==========================
-# =====================================================
-
+# ================= UI =================
 st.title("📈 Income Strategy Engine")
-st.caption("Dividend Run-Up • Regime-Aware • Income-First")
-
-tabs = st.tabs(["📊 Dashboard", "🧠 Strategy", "📰 News", "📁 Portfolio", "📸 Snapshots"])
-
-# =====================================================
-# MARKET / SECTOR BANNER (GLOBAL CLARITY LAYER)
-# =====================================================
-market_hits = sum(1 for v in impact_28d.values() if v < 0)
-
-if market_hits >= 2:
-    regime = "🔴 MARKET RISK REGIME — DO NOTHING DAY"
-    regime_color = "#7f1d1d"
-    DO_NOTHING = True
-elif market_hits == 1:
-    regime = "🟡 MIXED REGIME — Selective only"
-    regime_color = "#78350f"
-    DO_NOTHING = False
-else:
-    regime = "🟢 CONSTRUCTIVE REGIME — Normal operation"
-    regime_color = "#14532d"
-    DO_NOTHING = False
-
-st.markdown(
-    f"<div class='banner' style='background:{regime_color}'><b>{regime}</b><br>"
-    "Market / sector pressure detected across ETFs.</div>",
-    unsafe_allow_html=True
-)
+tabs = st.tabs(["📊 Dashboard","🧠 Strategy","📰 News","📁 Portfolio","📸 Snapshots"])
 
 # ================= DASHBOARD =================
 with tabs[0]:
-    st.subheader("📊 Overview")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Value", f"${total_value:,.2f}")
-    c2.metric("Monthly Income", f"${monthly_income:,.2f}")
-    c3.metric("Annual Income", f"${annual_income:,.2f}")
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Total Value",f"${total_value:,.2f}")
+    c2.metric("Monthly Income",f"${weekly_total*52/12:,.2f}")
+    c3.metric("Annual Income",f"${weekly_total*52:,.2f}")
 
-    st.divider()
-    for t in etf_list:
-        st.markdown(
-            f"<div class='card'><b>{t}</b><br>"
-            f"14d: <span class='{'green' if impact_14d[t]>=0 else 'red'}'>{impact_14d[t]:+.2f}</span> | "
-            f"28d: <span class='{'green' if impact_28d[t]>=0 else 'red'}'>{impact_28d[t]:+.2f}</span></div>",
-            unsafe_allow_html=True
-        )
+    for t in ETF_LIST:
+        st.markdown(f"""
+        <div class="card">
+        <b>{t}</b><br>
+        Weekly: <span class="green">${df[df.Ticker==t]["Weekly"].iloc[0]:.2f}</span><br>
+        <span class="{'green' if i14[t]>=0 else 'red'}">14d {i14[t]:+.2f}</span> |
+        <span class="{'green' if i28[t]>=0 else 'red'}">28d {i28[t]:+.2f}</span>
+        </div>
+        """,unsafe_allow_html=True)
 
 # ================= STRATEGY =================
 with tabs[1]:
-    st.subheader("🧠 Strategy Engine")
 
-    if DO_NOTHING:
-        st.error("⛔ DO NOTHING DAY ACTIVE — All buy signals overridden")
+    # ===== C: REGIME BANNER =====
+    avg_move = sum(i28.values())
+    if avg_move < -300:
+        regime = ("🔴 MARKET STRESS","red","High correlation sell-off — do nothing")
+        do_nothing = True
+    elif avg_move < 0:
+        regime = ("🟡 VOLATILE","yellow","Noise-dominated — selective only")
+        do_nothing = False
+    else:
+        regime = ("🟢 CONSTRUCTIVE","green","Normal income regime")
+        do_nothing = False
 
-    strategy_rows = []
-    for t in etf_list:
-        signal = "⏸ HOLD — Regime Risk" if DO_NOTHING else "🟢 ADD" if impact_28d[t] > 0 else "🟡 HOLD"
-        strategy_rows.append({
-            "Ticker": t,
-            "14d ($)": impact_14d[t],
-            "28d ($)": impact_28d[t],
-            "Signal": signal
+    st.markdown(f"""
+    <div class="card">
+    <b>{regime[0]}</b><br>
+    <span class="{regime[1]}">{regime[2]}</span>
+    </div>
+    """,unsafe_allow_html=True)
+
+    # ===== A: COMBINED SIGNAL TABLE =====
+    table=[]
+    scores={}
+    for t in ETF_LIST:
+        inc = df[df.Ticker==t]["Monthly"].iloc[0]
+        ns = news_score(t)
+        stab = "🟢 Stable" if inc>abs(i28[t])*1.5 else "🟡 Moderate" if inc>=abs(i28[t]) else "🔴 Weak"
+        score = (i14[t]>0)+(i28[t]>0)+ns+(1 if "Stable" in stab else 0)
+        scores[t]=score
+        table.append({
+            "Ticker":t,
+            "14d ($)":i14[t],
+            "28d ($)":i28[t],
+            "Monthly Income ($)":round(inc,2),
+            "Stability":stab,
+            "News":("🟢","🟡","🔴")[ns+1],
+            "Signal":"DO NOTHING" if do_nothing else "ADD" if score>2 else "HOLD" if score>0 else "AVOID"
         })
 
-    st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True)
+    st.dataframe(pd.DataFrame(table),use_container_width=True)
+
+    # ===== B: INCOME vs PRICE DAMAGE =====
+    st.subheader("💰 Income vs Price Damage")
+    for t in ETF_LIST:
+        net = df[df.Ticker==t]["Monthly"].iloc[0] + i28[t]
+        st.markdown(f"""
+        <div class="card">
+        <b>{t}</b><br>
+        Income: ${df[df.Ticker==t]["Monthly"].iloc[0]:.2f}<br>
+        Price: {i28[t]:+.2f}<br>
+        Net: <span class="{'green' if net>=0 else 'red'}">{net:+.2f}</span>
+        </div>
+        """,unsafe_allow_html=True)
+
+    # ===== E: ACTION GUIDANCE =====
+    st.subheader("🎯 Action Guidance")
+    for t in ETF_LIST:
+        reason = "Income dominates volatility" if df[df.Ticker==t]["Monthly"].iloc[0]>abs(i28[t]) else "Price damage exceeds income"
+        st.markdown(f"**{t}** → {('WAIT' if do_nothing else 'ACT')} — {reason}")
 
 # ================= NEWS =================
 with tabs[2]:
-    st.subheader("🧠 AI Market Analysis Summaries")
-
-    for t in etf_list:
-        articles = get_news(NEWS_FEEDS[t])
-        titles = " ".join(a.title.lower() for a in articles)
-
-        if any(w in titles for w in DANGER_WORDS):
-            summary = (
-                f"{t} weakness appears driven by **broader market or sector pressure**, "
-                "not ETF-specific structural issues. Similar language is present across related assets."
-            )
-        elif impact_28d[t] < 0:
-            summary = (
-                f"{t} pullback aligns with **post-distribution price normalization**, "
-                "with no abnormal risk signals detected in headlines."
-            )
-        else:
-            summary = (
-                f"{t} remains structurally stable. News flow supports **income continuity** "
-                "with no material deterioration detected."
-            )
-
-        st.markdown(f"<div class='card'><b>{t} Summary</b><br>{summary}</div>", unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("🗞 Raw Headlines")
-    for t in etf_list:
-        st.markdown(f"### {t}")
-        for n in get_news(NEWS_FEEDS[t], 4):
-            st.markdown(f"- [{n.title}]({n.link})")
+    st.subheader("🧠 AI Market Summaries")
+    for t in ETF_LIST:
+        mood = "Income-focused volatility, no structural risk detected." if news_score(t)>=0 else "Elevated risk language detected."
+        st.info(f"**{t}** — {mood}")
 
 # ================= PORTFOLIO =================
 with tabs[3]:
-    st.subheader("📁 Portfolio Control Panel")
-    for t in etf_list:
-        st.markdown(f"<div class='card'><b>{t}</b></div>", unsafe_allow_html=True)
+    for t in ETF_LIST:
+        s = st.session_state.holdings[t]["shares"]
+        d = st.session_state.holdings[t]["div"]
+        p = prices[t]
+        w = s*d
+        m = w*52/12
+        a = w*52
+        v = s*p
+
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            st.session_state.holdings[t]["shares"]=st.number_input(f"{t} Shares",0,step=1,value=s)
+        with c2:
+            st.session_state.holdings[t]["div"]=st.number_input(f"{t} Dividend / Share",0.0,step=0.01,value=d)
+        with c3:
+            st.markdown(f"""
+            <div class="card">
+            Price: ${p:.2f}<br>
+            Weekly: ${w:.2f}<br>
+            Monthly: ${m:.2f}<br>
+            Annual: ${a:.2f}<br>
+            Value: ${v:,.2f}
+            </div>
+            """,unsafe_allow_html=True)
+
+    st.session_state.cash=st.number_input("Cash",0.0,step=50.0,value=cash)
 
 # ================= SNAPSHOTS =================
 with tabs[4]:
-    st.subheader("📸 Portfolio Snapshots")
-    if st.button("💾 Save Snapshot"):
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        df.assign(Cash=cash, Total=total_value).to_csv(f"{SNAP_DIR}/{ts}.csv", index=False)
-        st.success("Snapshot saved")
-
-st.caption("v3.15.0 • Regime banner • Do Nothing Day • Analytical news summaries • all tabs active")
+    if st.button("Save Snapshot"):
+        ts=datetime.now().strftime("%Y%m%d_%H%M")
+        df.assign(Cash=cash,Total=total_value).to_csv(f"{SNAP_DIR}/{ts}.csv",index=False)
+        st.success("Saved")
