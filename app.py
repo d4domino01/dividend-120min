@@ -57,21 +57,12 @@ st.title("📁 Portfolio — Locked Foundation")
 
 validation_errors = []
 
-total_weekly = 0.0
-total_value = 0.0
+total_weekly = 0
+total_value = 0
 
-# ---------- FIRST PASS: CALCULATE TOTAL ----------
-for t in ETF_LIST:
-    h = st.session_state.holdings[t]
-    total_value += h["shares"] * prices[t]
-
-total_value += st.session_state.cash
-
-# ✅ TOP HEADER YOU ASKED FOR
-st.metric("💼 Total Portfolio Value", f"${total_value:,.2f}")
-st.divider()
-
-# ---------- MAIN LOOP ----------
+# =====================================================
+# HOLDINGS
+# =====================================================
 for t in ETF_LIST:
     st.subheader(t)
     c1, c2, c3 = st.columns(3)
@@ -99,6 +90,7 @@ for t in ETF_LIST:
     div = st.session_state.holdings[t]["div"]
     price = prices[t]
 
+    # ---- VALIDATION ----
     if shares < 0:
         validation_errors.append(f"{t}: shares invalid")
     if div < 0:
@@ -110,6 +102,7 @@ for t in ETF_LIST:
     value = shares * price
 
     total_weekly += weekly
+    total_value += value
 
     def col(v): return "green" if v >= 0 else "red"
 
@@ -127,6 +120,9 @@ for t in ETF_LIST:
 
 st.divider()
 
+# =====================================================
+# CASH
+# =====================================================
 st.subheader("💰 Cash Wallet")
 st.session_state.cash = st.number_input(
     "Cash ($)",
@@ -135,8 +131,24 @@ st.session_state.cash = st.number_input(
     value=float(st.session_state.cash)
 )
 
+total_value += st.session_state.cash
 monthly_income = total_weekly * 52 / 12
 annual_income = monthly_income * 12
+
+# =====================================================
+# LARGE PORTFOLIO HEADER (ONLY CHANGE)
+# =====================================================
+st.markdown(f"""
+<div class="card" style="text-align:center">
+    <div style="font-size:1.1rem;opacity:0.8;">💼 Total Portfolio Value</div>
+    <div style="font-size:2.3rem;font-weight:700;">
+        ${total_value:,.2f}
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+st.metric("Monthly Income", f"${monthly_income:,.2f}")
+st.metric("Annual Income", f"${annual_income:,.2f}")
 
 # =====================================================
 # LOCK CHECK
@@ -150,17 +162,14 @@ else:
     st.session_state.PORTFOLIO_LOCKED = True
     st.markdown("<div class='lock'>🟢 Portfolio LOCKED — safe to build on</div>", unsafe_allow_html=True)
 
-st.metric("Monthly Income", f"${monthly_income:,.2f}")
-st.metric("Annual Income", f"${annual_income:,.2f}")
-
 # =====================================================
-# DISABLED TABS NOTICE
+# DISABLED NOTICE
 # =====================================================
 st.divider()
 st.info("""
 🔒 **Dashboard, Strategy, News, Snapshots are intentionally disabled.**
 
-They will be re-enabled **one by one** only after Portfolio remains locked.
+They will be re-enabled **only after this Portfolio remains locked and stable**.
 """)
 
 st.caption("Portfolio v1.0 — single source of truth")
